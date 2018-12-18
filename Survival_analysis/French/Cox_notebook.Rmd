@@ -1,0 +1,505 @@
+---
+title: "Travaux pratiques Méthodes semi-paramétriques - Modèle de Cox"
+output: html_notebook
+---
+
+Ceci est un "notebook". Il permet d'écrire du code au milieu du texte et d'afficher son résultat lorsque le document est compilé. Vous pouvez également utiliser les icones en haut à droite de chaque "chunk" (partie où se trouve le code), par exemple, la flèche verte permet de ne recompiler que cette partie.
+
+Ce document est écrit en language markdown. Les bases qui vous permettront de comprendre la sytaxe sont juste que le "#" permet de définir le niveau du titre ("#" = titre 1; "##" = titre 1.1; "###" = titre 1.1.1;...). Le code R est écrit entre 2 balises, une d'ouverture du chunk et une de fermeture. Exemple:
+
+```{r}
+head(cars)
+```
+
+Le résultat du code s'affiche en dessous si vous compilez le document, ou juste ce chunck en cliquant sur la flèche verte.
+
+Finalement, lorsque votre document est terminé, vous pouvez obtenir une version clean en cliquant sur le bouton "preview" ou en tapant *Ctrl+Shift+K*. Un fichier de type html se trouve maintenant à côté de votre fichier Rmd, que vous pouvez garder pour vous ou envoyer à quelqu'un, il suffit d'un navigateur internet (même sans connexion) pour pouvoir l'afficher.
+
+Revenons maintenant au cours...
+
+
+
+# Rappels: Création d'un "survival object" dans R
+
+Rechargeons les packages essentiels:
+
+```{r}
+library(survival)
+library(ggplot2)
+library(survminer)
+```
+
+Ensuite, utilisons le dataset *veteran* et créons une variable binaire *age55* égale à 0 si l'age $\leq 55$ ans ou est égale à 1 si l'age $\ge 55$ ans.
+
+```{r}
+veteran$timeMon<-veteran$time/30.4375 # time in months
+veteran$age55<-ifelse(veteran$age<=55, 0, 1) #if age <= 55 years, 0, else 1
+head(veteran)
+```
+
+Pour obtenir l'estimateur de Kaplan-Meier
+
+```{r}
+KM<-survfit(Surv(timeMon,status)~age55,data=veteran)
+KM
+```
+
+Et pour obtenir la p-value du test du logrank:
+```{r}
+survdiff(Surv(timeMon,status)~age55,data=veteran)
+```
+
+Le nombre de décimales pour la p-value est très faible. Pour avoir plus de précision, on peut la recalculer à la main:
+
+```{r}
+logrank0<-survdiff(Surv(timeMon,status)~age55,data=veteran)
+1-pchisq(logrank0$chisq, length(logrank0$n) - 1)
+```
+
+
+
+
+Pour afficher le graphique avec ggplot2 et survminer (énormément d'options de customisation!):
+
+```{r}
+ggsurvplot(KM,
+  conf.int = TRUE, #plot confidence interval?
+  censor=TRUE,  #Print censor times? (cross)
+  linetype=1, #default: 1=continuous line; other options: 2=dotted line, 3=pointed line,...
+  main="Veteran survival",
+  ylab="Survival probability", #label/title of the Y axis
+  xlab="Time since randomization (in months)", #label/title of the X axis
+  legend=c(0.85,0.9), # coordinate = % of the image, here = at 85% of the X-axis (right of the plot) and at 90% of Y-axis (top of the plot)
+  legend.labs=c("age <= 55 years old","age > 55 years old"),
+  pval = TRUE, #print p-value of the logrank test?
+  pval.coord=c(20,0.5), #where to print the p-value of the test on the plot (here x=20 and y=0.1)
+  risk.table = TRUE, #print the table with the number of patients at risk?
+  risk.table.title="Number of patients at risk", #title of the table
+  risk.table.y.text = TRUE, #if TRUE, the name of the strata is printed in the table. If FALSE, a line of the color of the strata 
+  risk.table.y.text.col = FALSE, #color of the name of the strata similar to curve, here, only one group
+  break.time.by=10, #times at which print the number of patients at risk
+  ggtheme=theme_bw()
+  )
+```
+
+
+
+# Modèle de Cox
+
+## Modèle de Cox univarié avec variable binaire
+
+### Comparaison avec Kaplan-Meier
+
+Réalisons la même comparaison que précédement (en utilisant la variable *age55* que nous avons créé plus haut), mais cette fois-ci avec le modèle de Cox :
+
+```{r}
+fitCox0<-coxph(Surv(timeMon,status)~age55,data=veteran)
+```
+
+Pour afficher le risque cumulé pour chaque groupe:
+
+```{r}
+baselineH<-basehaz(fitCox0,centered=F)
+plot(baselineH$time,baselineH$hazard*exp(coef(fitCox0)),type="l",lty=2)
+lines(baselineH$time,baselineH$hazard)
+legend("topleft",c("< 55 years old",">= 55 years old"),lty=1:2,bty="n")
+```
+
+
+Regardons ce que cela donne au niveau des courbes de survie :
+
+```{r}
+plot(KM,main="Veteran survival",ylab="Survival probability",xlab="Time since randomization (in months)",lty=1:2)
+survCox00<-survfit(fitCox0,newdata=list(age55=0),conf.int=F)
+lines(survCox00,col=2)
+survCox01<-survfit(fitCox0,newdata=list(age55=1),conf.int=F)
+lines(survCox01,col=2,lty=2)
+legend("topright",c("< 55 years old, KM",">= 55 years old, KM","< 55 years old, Cox",">= 55 years old, Cox"),lty=c(1,2,1,2),col=c(1,1,2,2))
+```
+
+Le modèle de Cox reposant sur des hypothèses (proportionalité des risques et log-linéarité, cf ci-dessous), il est moins souple que l'estimateur de Kaplan-Meier. Cependant, un modèle trop souple est souvent difficile à interpréter et risque d'être trop ajusté aux données, extrapolant moins bien sur de nouvelles données (moins bonne prédictions) : c'est le phénomène de sur-apprentissage du à une sur-paraméterisation.
+D'autre part, le modèle de Cox a l'avantage par rapport à l'estimateur de Kaplan-Meier de pouvoir considérer des variables continues, des relations non-linéaires,...
+
+
+
+### Comparaison avec le logrank
+
+Récupérons les statistiques de test:
+
+```{r}
+summary(fitCox0)
+cat("\n Print coefficient and p-value with more precision: \n \n") # \n = end of a line (use here to add blank lines)
+summary(fitCox0)$coef
+```
+
+*Que constate-t-on ?*
+La p-value (issue du test de Wald) est très proche de celle du logrank ! Logique car ces tests sont asymptotiquement équivalents !
+
+*La fonction donne différentes statistiques de test à la fin :*
+- La statistique du test du rapport de vraisemblance, la plus robuste aux faibles effectifs, mais nécessite d'estimer les paramètres de 2 modèles pour estimer la pertinence d'une variable
+- La statistique du test de Wald est celle indiquée au dessus, car la plus couramment fournie dans tous les modèles (ex: GLM, survie paramétrique,...)
+- La statistique du test du score est exactement celle du test du logrank (car c'est le même test)
+ 
+*Quelle est la signification de ce test ?*
+Elle correspond à la comparaison du modèle par rapport à un modèle "vide". En univarié, elle correspond au test de la pertinence d'introduire la variable. En multivarié, elle correspond au test de la pertinence d'introduire toutes les variables du modèle par rapport à un modèle vide.
+
+
+*Logrank ou Cox ?*
+Le logrank est le test de base le plus connu pour comparer 2 groupes. Mais il ne donne pas d'indicateur pour quantifier l'importance de cette variable. 
+Le modèle de Cox fourni cet indicateur par le hazard ratio (HR) qui s'interprète comme la multiplication du risque si l'on est dans la catégorie 1 par rapport à la catégorie 0. Dans les publications, cet HR est celui présenté sur les graphiques de Kaplan-Meier avec la p-value du logrank.
+
+
+### Proportionalité des risques
+
+Le modèle de Cox repose sur l'hypothèse de proportionalité des risques, le risque chez les plus de 55 ans est le risque chez les moins de 55 ans (baseline hazard) multiplié par le HR, quel que soit le temps. Nous pouvons le tester à partir des résidus de Schoenfeld avec la fonction *cox.zph* :
+
+```{r}
+cox.zph(fitCox0)
+```
+
+Et la représentation graphique :
+
+```{r}
+plot(cox.zph(fitCox0))
+```
+Attention : si plusieurs variables sont présentes, il faudra faire une fenêtre graphique pouvant contenir tous les graphiques (ex: si 4 variables, utiliser *par(mfrow=c(2,2))* pour avoir 4 cases) ou n'en demander qu'un (ex : pour la 1ère variable, utiliser *plot(cox.zph(fitCox0)[1])*).
+
+
+*Comment interprète-t-on ce test ?*
+
+
+*Que faire si l'hypothèse de proportionalité des risques n'est pas respectée ?*
+L'une des solutions les plus courantes est de considérer que la valeur du HR n'est pas constante dans le temps, en rajoutant par exemple une intéraction avec le temps.
+
+
+## Effet dépendant du temps et variable dépendante du temps
+
+
+### Effet dépendant du temps
+
+Supposons que l'hypothèse de proportionalité des risques ne tient pas pour HR précédent. Afin de rajouter une intéraction avec le temps, nous pouvons utiliser la fonction *tt* (time transform) dans la fonction *coxph* :
+
+```{r}
+summary(fitCox1<-coxph(Surv(timeMon,status)~age55+tt(age55),data=veteran,tt=function(x,t,...) x*t))
+```
+
+Ici, nous avons rajouté une simple interation entre notre variable et le temps, i.e., à chaque temps, *tt(age55)* vaut 0 si *age55* vaut 0, et elle vaut *t* si *age55* vaut 1. Le 1er HR correspond à la variable *age55* alors que le second correspond à cette variable transformée. Nous pouvons imaginer des relations plus complexes telles qu'une transformation logarithmique :
+
+```{r}
+summary(fitCox2<-coxph(Surv(timeMon,status)~age55+tt(age55),data=veteran,tt=function(x,t,...) x*log(t)))
+```
+
+Ou même encore plus complexe, en utilisant des splines :
+```{r}
+summary(fitCox3<-coxph(Surv(timeMon,status)~age55+tt(age55),data=veteran,tt=function(x,t,...) pspline(x*t)))
+```
+Mais attention à la complexification : cela n'améliore pas toujours les performances du modèle et cela devient très vite difficile à interpréter !
+
+
+### Variable dépendante du temps (non abordée dans ce TP)
+
+Ce cas diffère du 1er dans le sens où la valeur d'une variable peut changer au cours du temps (départ/arrêt de traitement, nombre de grosses, poids,...), mais le HR peut lui être constant dans le temps. Dans ce cas, les 2 méthodes les plus communes sont:
+
+* Découper le suivi de chaque patient en fonction de la dernière valeur observée
+* Analyse du landmark
+
+
+
+
+
+
+## Modèle de Cox univarié avec variable catégorielle
+
+A vous de jouer ! Refaites les mêmes analyses que précédemment avec la variable *celltype*. Attention ! Si votre variable est une variable catégorielle avec les modalités 0, 1, 2,..., ne pas oublier de la transformer en factor ! (sinon elle sera prise en compte comme une variable continue)
+
+### Comparaison avec Kaplan-Meier
+
+```{r}
+
+```
+
+
+### Comparaison avec le logrank
+
+```{r}
+
+```
+
+
+### Proportionalité des risques
+
+```{r}
+
+```
+
+
+
+## Modèle de Cox univarié avec variable continue
+
+### Comparaison avec Kaplan-Meier et logrank
+
+Lorsque la variable est continue, l'estimation de Kaplan-Meier nous donnerait une courbe par valeur, chaque courbe étant à 1 jusqu'à ce que l'évènement se produise, puis tomberait directement à 0. De ce fait, il n'est donc également pas possible d'utiliser le test du logrank.
+Le modèle de Cox en revanche permet de prendre en compte ce type de variable. Dans ce cas, on teste si la variation de risque lorsque la valeur de la variable testée augmente de 1 est différente de (HR différent de 1).
+
+Essayons cette fois-ci avec l'âge en continu :
+
+```{r}
+summary(fitCoxAge<-coxph(Surv(timeMon,status)~age,data=veteran))
+```
+
+
+### Proportionalité des risques
+
+```{r}
+cox.zph(fitCoxAge)
+```
+
+
+### Log-linéarité
+
+#### Définition
+
+Pour un HR de 1.25 :
+
+* lorsque la variable est égale à 0 ($HR=exp(log(1.25)*0)=1$), le risque est la baseline hazard
+* lorsque la variable est égale à 1 ($HR=exp(log(1.25)*1)=1.25$), le risque est la baseline hazard multiplié par 1.25
+* lorsque la variable est égale à 1 ($HR=exp(log(1.25)*2)=1.56$), le risque est la baseline hazard multiplié par 1.56
+* lorsque la variable est égale à 1 ($HR=exp(log(1.25)*3)=1.95$), le risque est la baseline hazard multiplié par 1.95
+* ...
+
+Sur l'échelle logarithmique, il y a linéarité (le log du risque est multiplié par log(HR) pour chaque augmentation de la valeur de la variable de 1) : c'est l'hypothèse de log-linéarité. Cette hypothèse peut être très forte, par exemple, l'augmentation de risque de cancer du sein entre 18 et 19 ans est probablement plus faible qu'entre 55 et 56 ans. 
+
+
+#### Vérification de l'hypothèse de log-linéarité
+
+Il n'existe pas de test faisant autant le consensus que celui pour les résidus de Shoenfoeld.
+
+Elle peut être vérifiée en utilisant les résidus de martingale :
+
+```{r}
+resMart<-residuals(fitCoxAge,"martingale")
+plot(veteran$age,resMart,xlab="Age",ylab="Martingale residuals")
+lines(lowess(veteran$age,resMart),col=2)
+abline(h=0)
+```
+
+Les résidus de martingale sont asymétriques (car compris entre $-\infty$ et $+1$), pouvant écraser la courbe et compliquer l'interprétation. Les résidus de la déviance sont une version "symétrisée" des résidus de martingale, dont les valeurs sont centrées sur 0 et comprises entre $-1$ et $+1$, permettant de mieux apprécier les tendances des résidus :
+
+```{r}
+resDev<-residuals(fitCoxAge,"deviance")
+plot(veteran$age,resDev,xlab="Age",ylab="Deviance residuals")
+lines(lowess(veteran$age,resDev),col=2)
+abline(h=0)
+```
+
+Aucune tendance particulière ne se dégage, l'hypothèse de log-linéarité semble être respectée.
+
+Une dernière possibilité est d'introduire un effet non-linéaire et de le comparer au modèle linéaire. Utilisons ici des splines :
+```{r}
+summary(fitCoxAgeSp<-coxph(Surv(timeMon,status)~pspline(age),data=veteran))
+```
+
+Comparons les effets de façon graphique:
+```{r}
+pred0<-predict(fitCoxAge,type="terms",se.fit=TRUE,terms=1)
+pred1<-predict(fitCoxAgeSp,type="terms",se.fit=TRUE,terms=1)
+plot(sort(veteran$age),exp(pred1$fit)[order(veteran$age)],type='l',main=" Age Hazard Ratio",ylab="Hazard Ratio",xlab='Age',col=2)#,ylim=c(0,min(c(max(exp(pred0$fit+1.96*pred0$se)),max(exp(pred1$fit+1.96*pred1$se)))))
+lines(sort(veteran$age),exp(pred1$fit+1.96*pred1$se)[order(veteran$age)],lty=2,col=2)
+lines(sort(veteran$age),exp(pred1$fit-1.96*pred1$se)[order(veteran$age)],lty=2,col=2)
+lines(sort(veteran$age),exp(pred0$fit)[order(veteran$age)])
+lines(sort(veteran$age),exp(pred0$fit+1.96*pred0$se)[order(veteran$age)],lty=2)
+lines(sort(veteran$age),exp(pred0$fit-1.96*pred0$se)[order(veteran$age)],lty=2)
+abline(h=1,lty=3)
+legend("topright",c("Log-linear assumption","Spline"),col=1:2,bty="n",lty=1)
+```
+La bande de la spline recouvre l'estimation de la relation log-linéaire. On peut supposer que l'hypothèse de log-linéarité semble être respectée.
+
+
+#### Hypothèse de log-linéarité non vérifiée
+
+Dans le cas où cette hypothèse ne serait pas valide, plusieurs solutions sont possibles :
+
+* catégoriser la variable continue
+* utiliser une relation non-linéaire
+
+En général, aucune des 2 n'est adéquate :
+
+* la catégorisation augmente le nombre de paramètres à estimer. De plus, lorsqu'elle est trop "grossière" (ex: âge $\leq 55$ ans), une relation peut être annulée, ex : la relation du risque de cancer du sein en fonction de l'âge a une forme en U (fort risque chez les jeunes femmes et chez les plus âgée), la catégorisation âge $\leq 50$ ans tombe dans le bas du U. La relation moyenne entre les 2 bras du U est donc nulle, car la moyenne du 1er groupe et celle du 2ème sont au milieu de chaque bras. Tirant un trait entre ces 2 points, nous avons une relation nulle, le HR sera proche de 1. Si cette catégorisation est trop "fine", de nombreuses catégories peuvent ne pas contenir d'évènements (ou très peu), posant des problèmes d'estimation.
+* la forme non-linéaire est plus difficile à interpréter car moins naturelle (logarithme de l'âge ?) ou plus complexe (ex: utilisation de spline). Dans le second cas, elle peut entraîner du sur-apprentissage.
+
+Il est donc nécessaire de raisonner avec parcimonie. Il est possible de réaliser plusieurs analyses de sensibilité, mais attention tout de même à la problématique de multiplicité des tests : quand on cherche, on trouve, mais il s'agit peut être du hasard... Le plus souvent, un effet mis en évidence en testant différents modèles avec de nombreuses catégorisations différentes est peu reproductible d'une étude à l'autre, car il sera le resultat d'une trop grande adéquation aux données (sur-apprentissage).
+
+
+
+
+# Sélection de modèle
+
+## Modèles emboités
+
+Comme précisé précédemment, les tests du score et de Wald sont des approximation du
+Lorsque l'on compare 2 modèles et l'un est un sous-modèle du 1er, ils sont dis "emboités". Par exemple :
+```{r}
+mod0<-coxph(Surv(timeMon,status)~age,data=veteran)
+mod1<-coxph(Surv(timeMon,status)~age+karno,data=veteran)
+```
+
+Le test de rapport de vraisemblance peut être appliqué (le mod1 doit être celui avec le plus de paramètres) :
+```{r}
+lrt0<-mod0$loglik[2] #get the loglikelihood of the smaller model
+lrt1<-mod1$loglik[2] #get the loglikelihood of the larger model
+difddl<-length(mod1$coef)-length(mod0$coef) #number of degrees of freedom for the test
+chi<--2*lrt0+2*lrt1 #chi square statistic
+p<-1-pchisq(chi,difddl)
+p
+```
+
+Ici, la variable *karno* apporte beaucoup d'information (p = `r p`) et doit être conservée.
+La variable *age* doit-elle être conservée ?
+```{r}
+mod0<-coxph(Surv(timeMon,status)~karno,data=veteran)
+mod1<-coxph(Surv(timeMon,status)~age+karno,data=veteran)
+lrt0<-mod0$loglik[2] #get the loglikelihood of the smaller model
+lrt1<-mod1$loglik[2] #get the loglikelihood of the larger model
+difddl<-length(mod1$coef)-length(mod0$coef) #number of degrees of freedom for the test
+chi<--2*lrt0+2*lrt1 #chi square statistic
+p<-1-pchisq(chi,difddl)
+p
+```
+
+
+
+
+
+## Modèles non-emboités
+
+Si 2 modèles diffèrent par la forme fonctionnelle d'une ou plusieurs variables. Prenons par exemple les modèles avec les différentes formes fonctionnelles des interactions entre l'âge et le temps.
+Dans ce cadre, les critères les plus utilisés sont l'Akaike Information Criterion (AIC) et le Bayesian Information Criterion (BIC), en fonction de l'objectif du modèle. Pour ces 2 critères, une plus faible valeur corresponds à un meilleur modèle.
+
+```{r}
+AIC(mod0)
+AIC(mod1)
+BIC(mod0)
+BIC(mod1)
+```
+
+Ils sont en général cohérents. Lorsque ce n'est pas le cas, il faut choisir selon si l'on considère que le "vrai" modèle se trouve parmis ceux testés (BIC), ou si l'on suppose qu'aucun modèle n'est vrai et que nous souhaitons sélectionner le moins mauvais (AIC).
+
+Reprenons l'exemple de la comparaison d'un effet non-log-linéaire à un effet log-linéaire :
+```{r}
+AIC(fitCoxAge)
+AIC(fitCoxAgeSp)
+BIC(fitCoxAge)
+BIC(fitCoxAgeSp)
+```
+Ici, nous avons un désacord entre ces 2 critères. Cependant, la différence est faible, il est donc plus raisonnable de choisir le modèle le plus interprétable, d'autant plus que la forme de la spline est très influencée par ses extrêmités, pour lesquelles nous avons peu de confiance en leurs tendances (du fait du faible nombre d'observations pour les âges les plus faibles et les plus avancés, qui s'observe par l'élargissement de la bande de confiance).
+
+## Note sur la grande dimension
+
+Lorsque le nombre de variables est grand, le nombre de modèles possible est également grand. La sélection pas à pas permet de ne pas avoir à tester tous les modèles possibles (ce qui prendrait trop de temps), mais ce n'est pas une stratégie stable. En partant de différentes combinaisons de variables, le modèle final sélectionné peut être différent. Simulons un jeu de données avec 1 intercept à 10, 46 variables n'ayant aucun effet, et 55 autres ayant un effet sur la réponse. Réalisons une sélection pas à pas avec l'AIC, en partant de 2 modèles différents :
+
+```{r}
+set.seed(123)
+n<-150 #number of observations
+betas<-c(10,2,2,0.5,0.5,rep(0,46),rnorm(50,1,5)) #Effect of each covariate
+stepX<-sapply(1:100,function(x)rnorm(n)) #Generate the 100 independent random gaussian variables
+stepY<-rnorm(n,cbind(rep(1,n),stepX)%*%betas,0.5)
+stepData<-data.frame(y=stepY,x=stepX)
+colnames(stepData)<-c("y",paste0("x",1:100))
+library(MASS)
+#fit linear model
+fit0<-lm(y~1,data=stepData) #NULL model
+fit1<-lm(y~.,data=stepData) #Model with all covariates
+fit2<-lm(y~x1+x18+x35,data=stepData) #first starting model
+#both (backward and forward) stepwise selection from the model fit2
+a<-names(stepAIC(fit2,direction="both",trace=F,
+                scope = list(upper = fit1, lower = fit0))$coef) #variables in the final model
+#both (backward and forward) stepwise selection from the model fit3
+fit3<-lm(y~x15+x27+x85,data=stepData) #second starting model
+b<-names(stepAIC(fit3,direction="both",trace=F,
+                scope = list(upper = fit1, lower = fit0))$coef) #variables in the final model
+#difference between the variables selected according to the starting model
+setdiff(a,b) #"x18" "x43" "x92" "x9"  "x33"
+setdiff(b,a) #"x6"  "x5"  "x7"  "x46" "x16"
+
+```
+
+Les modèles sélectionnés sont complètement différents... Lorsque vous vous retrouvez face à cette situation :
+
+* testez plusieurs points de départ pour vérifier la stabilité de la procédure
+* estimez tous les paramètres possibles et comparez les avec l'AIC ou le BIC (long) ou 2 à 2 avec le test de rapport de vraisemblance. Cette 2ème solution est encore plus long et plus complexe à mettre en oeuvre, mais vous avez une règle de décision (p-value), contrairement à l'AIC et le BIC (la différence entre un AIC de 30012 et un de 30015 est-elle significative ?)
+* utilisez des méthodes de sélection pour la grande dimension (en dehors du scope de ce cours : plus complexes et avec des résultats potentiellement instables -> maitrisez la théorie avant de les utiliser)
+
+
+
+
+# A vous de jouer:
+
+Modèle de Cox multivarié avec plusieurs variables.
+
+## Ajuster un modèle de Cox univarié sur la variable cell
+
+* Que signifie le test de rapport de vraisemblance (LR-test) ?
+* Comment est-il construit ?
+* Comment l'interpréter ?
+
+```{r}
+
+```
+
+
+## Ajuster un modèle de Cox multivarié sur les variables *age* et *treat*
+
+```{r}
+
+```
+
+Calculer la (log)vraisemblance du modèle et le nombre de ddl
+
+```{r}
+
+```
+
+
+
+
+## Ajuster un modèle de Cox multivarié sur les variables *age*, *treat* et *cell*
+
+```{r}
+
+```
+
+Calculer la (log)vraisemblance du modèle et le nombre de ddl
+
+```{r}
+
+```
+
+
+## Calculer la statistique du test de rapport de vraisemblance
+
+```{r}
+
+```
+
+## Quelle loi suit cette statistique ?
+
+
+## Conclure sur la base de ce test
+
+
+
+## Quelle serait la conclusion si on aurait utilisé le critère AIC ? BIC?
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+

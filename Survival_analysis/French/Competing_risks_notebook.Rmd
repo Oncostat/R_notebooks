@@ -1,0 +1,285 @@
+---
+title: "Risques concurrents"
+output: html_notebook
+---
+
+
+# Préparation du jeu de données
+
+Simulons nos propres données. Allons-y de la façon la plus simple en se basant sur la simulation à partir des risques cause-spécifiques. Tout d'abord, générons 100 individus traités et 100 non-traités (par exemple dans un essai de comparaison de l'efficacité d'un traitement):
+
+```{r,warnings=F}
+data<-data.frame(trt=sort(rep(0:1,200)))
+table(data$trt)
+```
+
+Définissons 3 évènements déterminant la fin de suivi :
+
+- censure non-informative ($D=0$)
+- décès par cancer du poumon ($D=1$)
+- décès par autre maladie ($D=2$)
+
+Cette étude sera focalisé sur le risque de décès par cancer ($D=1$). Dans ce contexte, on peut supposer qu'un décès par une autre maladie peut indiquer un état de santé général plus mauvais que les personnes encore en vie. On ne peut donc pas considérer que si on avait pu suivre les personnes décédées par autre maladie au delà de leur décès, elles auraient pu avoir le même risque que ceux encore en vie. A noter qu'un accident de voiture n'est en aucun cas informatif et n'est donc pas un évènement concurrent (car ne renseigne pas sur l'état de santé général). Une personne ayant eu ce type d'évènement serait donc dans la censure non-informative ($D=0$).
+
+Supposons que les distributions des temps de ces 3 évènements ($X_0,X_1,X_2$) soient des lois exponentielles de paramètres $\lambda_{0}=2$, $\lambda_{1}=5$ et $\lambda_{2}=3$. Le temps observé pour un individu est le minimum des 3, $t=min(X_0,X_1,X_2)$. Maintenant, considérons que le traitement va avoir un bénéfice important sur la survie cause-spécifique du cancer (avec un HR de 0.75), mais aucun impact sur les autres risques.
+
+```{r}
+set.seed(1234) #permet d'obtenir les mêmes chiffres "aléatoires" en relançant à partir de cette ligne -> reproductibilité scientifique !
+X0<-rexp(400,2)
+X1<-rexp(400,5*exp(log(0.5)*data$trt)) #si trt=0, 5, sinon, 5*0.75=3.75
+X2<-rexp(400,3)
+data$D<-apply(cbind(X0,X1,X2),1,which.min)-1
+data$stime<-pmin(X0,X1,X2) #équivalent à apply(cbind(X0,X1,X2),1,min)
+```
+
+
+Vérifions si nous avons bien simulé notre risque cause-spécifique :
+
+
+```{r}
+library(survival)
+summary(fit0<-coxph(Surv(stime,I(D==0))~trt,data=data))
+print("#####################################")
+summary(fit1<-coxph(Surv(stime,I(D==1))~trt,data=data))
+print("#####################################")
+summary(fit2<-coxph(Surv(stime,I(D==2))~trt,data=data))
+```
+
+
+Que constate-t-on ?
+Nous avons bien un effet significatif sur le risque de cancer (avec un HR ~ 0.5), et pas sur les autres.
+
+NB : Il est possible que certaines simulations donnent des résultats moins en adéquation (ex: utilisez la graine "123"). Mais elles sont tout de même valides car elles sont une réalisation possible du modèle. Aussi, c'est pour cela que l'on réalise plusieurs centaines (ou milliers) de simulations lors d'études afin de vérifier nos résultats sur un maximum de cas possible.
+
+
+
+
+# Estimation de la fonction d'incidence cumulée (CIF)
+
+## Biais de l'estimation par la méthode de Kaplan-Meier
+
+Inspirez-vous des codes des sessions précédentes pour estimer la fonction de survie de décès par cancer et celle du décès par autre maladie selon la méthode de Kaplan-Meier (non-ajustée):
+
+```{r}
+fitKM1<-survfit(Surv(stime,I(D==1))~1,data=data)
+fitKM2<-survfit(Surv(stime,I(D==2))~1,data=data)
+```
+
+Réalisez un graphique de ces fonctions de survie :
+
+```{r}
+plot(fitKM1,conf.int=F,ylab="Survival probability",xlab="Time")
+lines(fitKM2,conf.int=F,col=2)
+legend("topright",c("Cancer","Autre"),lty=1,col=1:2,bty="n")
+```
+
+
+
+
+Réalisez un graphique des fonctions d'incidence cumulée : 
+Indices:
+- pour obtenir les temps de survie de l'objet survfit, il suffit de faire *fitKM1$time*
+- pour obtenir les probabilités de survie de l'objet survfit, il suffit de faire *fitKM1$surv*
+- $CIF(t)=1-S(i)$
+
+
+```{r}
+plot(fitKM1$time,1-fitKM1$surv,type='l',ylab="CIF",xlab="Time")
+lines(fitKM2$time,1-fitKM2$surv,col=2)
+legend("topleft",c("Cancer","Autre"),lty=1,col=1:2,bty="n")
+```
+
+En cumulant les incidences des 2 évènements:
+
+```{r}
+times<-c(fitKM1$time,fitKM2$time)
+difCIF1<-diff(c(0,1-fitKM1$surv))
+difCIF2<-diff(c(0,1-fitKM2$surv))
+difCIF<-c(difCIF1,difCIF2)[order(times)]
+plot(sort(times),cumsum(difCIF),type='l',col=2,ylab="CIF",xlab="Time")
+lines(fitKM1$time,1-fitKM1$surv)
+legend("topleft",c("Cancer","Cancer + Autre"),lty=1,col=1:2,bty="n")
+```
+
+Que constatez-vous ?
+Normalement, une somme de probabilité $\leq 1$ !
+La fonction de survie à partir du risque cause spécifique est donc ininteprétable en terme de CIF (et donc également en terme de survie, car le graphique inverse donnerait des probabilités de survie $< 0$)...
+
+
+## Méthode de Aalen
+
+En présence de risques concurrents, l'estimateur à employer est l'estimateur de Aalen. Afin de se simplifier la vie, nous pouvons utiliser le package *cmprsk* qui contient tout un tas de fonction pour réaliser des analyses en présence de risques concurrents.
+
+```{r}
+## Load package
+library(cmprsk)
+```
+
+Afin d'estimer la CIF, il suffit d'utiliser la fonction *cuminc* :
+
+```{r}
+print(fitCIF<-cuminc(ftime=data$stime,fstatus=data$D))
+plot(fitCIF,col=1:2,lty=1,curvlab = c("Cancer","Autre"))
+```
+
+
+Si nous comparons à celle données par l'estimateur de Kaplan-Meier:
+
+```{r}
+plot(fitCIF,col=1:2,lty=1,curvlab =c("Cancer (Aalen)","Autre (Aalen)"))
+lines(fitKM1$time,1-fitKM1$surv,lty=2)
+lines(fitKM2$time,1-fitKM2$surv,col=2,lty=2)
+legend("bottomright",c("Cancer (Kaplan-Meier)","Autre (Kaplan-Meier)"),col=c(1,2),lty=c(2,2),bty="n")
+```
+
+
+Que constate-t-on ?
+CIF $<<<$ KM.
+Les 2 CIF sont approximativement égales à 0.5, leur somme est donc $\leq 1$.
+
+
+
+
+## Comparaison de la CIF dans 2 groupes
+
+La comparaison de 2 groupes peut être réalisée à l'aide du test de Gray, toujours avec la fonction *cuminc*, mais nous lui indiquons les groupes que nous voulons comparer :
+
+```{r}
+fitCIFtrt<-cuminc(ftime=data$stime,fstatus=data$D,group=data$trt)
+fitCIFtrt
+```
+
+Les valeurs des p-values se trouvent dans la colonne *pv*. On constate que l'on a une différence entre les 2 bras de traitement pour les 2 CIF. Cependant, cela ne nous permet pas de conclure dans le sens de la relation. Pour cela, faisons un graphique des CIF dans chaque groupes :
+
+```{r}
+plot(fitCIFtrt,col=c(1,1,2,2),lty=c(1,2,1,2),curvlab = c("Cancer non-traité","Cancer traité","Autre non-traité","Autre traité"))
+```
+
+Avec le traitement, la CIF de décès par cancer semble diminuer, alors que celle de décès par autre cause semble augmenter. On peut imaginer que l'efficacité biologique du traitement entraine une diminution du risque cause-spécifique de décès par cancer (cf partie simulations), et par conséquent, sa CIF. Ces patients survivant plus longtemps, ils sont plus longtemps à risque de décès par autre cause, ce qui entraine mécaniquement une augmentation de sa CIF, sans qu'il y ait de relation directe entre le traitement et le décès par autre cause (pas d'association entre le traitement et le risque cause-spécifique, cf partie simulations).
+
+L'utilisation du modèle de Fine and Gray nous permettra dans la section suivante d'obtenir une mesure de cette différence à travers le hazard ratio de la sous-distribution.
+
+## Modèle de Fine and Gray
+
+### Estimation
+
+Tout comme la fonction *cuminc*, l'implémentation est moins classique dans R que les autres modèles (*glm*, *coxph*,...). On l'écrit comme cela :
+
+```{r}
+fitFG1<-crr(ftime=data$stime,fstatus=data$D,cov1=data$trt)
+summary(fitFG1)
+```
+
+Nous observons que la CIF de décès par cancer est diminuée par le traitement (HR de sous-distribution = 0.503).
+Pour effectuer la même analyse pour le risque de décès par autre cause (status = 2) :
+
+```{r}
+fitFG2<-crr(ftime=data$stime,fstatus=data$D,cov1=data$trt,failcode=2)
+summary(fitFG2)
+```
+
+On oberve une augmentation significative de la CIF avec le traitement. On ne peut pas y assigner l'hypothèse d'un effet direct (relation "causale"), car il n'y avait pas de lien entre le traitement et le risque cause spécifique de décès par autre cause. Cette augmentation est uniquement du à l'impact du traitement sur le risque cause-spécifique de décès par cancer (les patients survivant plus longtemps, ils sont exposés plus longtemps au risque de décès par autre cause).
+
+Pour afficher les courbes de CIF, il suffit d'utiliser la fonction *predict* :
+
+```{r}
+par(mfrow=c(2,1))
+#décès par cancer
+pred0<-predict(fitFG1,cov1=0) #prediction pour un patient non-traité (trt=0)
+pred1<-predict(fitFG1,cov1=1) #prediction pour un patient traité (trt=1)
+plot(pred0,ylim=c(0,1),ylab="CIF",xlab="Temps",main="Fonction d'incidence cumulée du décès par cancer")
+lines(pred1,col=2)
+legend("topleft",c("Non-traité","Traité"),lty=1,col=1:2,bty="n")
+#décès par autre cause
+pred0<-predict(fitFG2,cov1=0) #prediction pour un patient non-traité (trt=0)
+pred1<-predict(fitFG2,cov1=1) #prediction pour un patient traité (trt=1)
+plot(pred0,ylim=c(0,1),ylab="CIF",xlab="Temps",main="Fonction d'incidence cumulée du décès par autre cause")
+lines(pred1,col=2)
+legend("topleft",c("Non-traité","Traité"),lty=1,col=1:2,bty="n")
+```
+
+Aalen vs Fine and Gray :
+
+```{r}
+plot(fitCIFtrt,col=c(1,1,2,2),lty=c(1,2,1,2),curvlab = c("Cancer non-traité","Cancer traité","Autre non-traité","Autre traité"))
+pred0<-predict(fitFG1,cov1=0) #prediction pour un patient non-traité (trt=0)
+pred1<-predict(fitFG1,cov1=1) #prediction pour un patient traité (trt=1)
+lines(pred0,lwd=2)
+lines(pred1,lty=2,lwd=2)
+pred0<-predict(fitFG2,cov1=0) #prediction pour un patient non-traité (trt=0)
+pred1<-predict(fitFG2,cov1=1) #prediction pour un patient traité (trt=1)
+lines(pred0,lwd=2,col=2)
+lines(pred1,lty=2,lwd=2,col=2)
+```
+
+Les CIF sont approximativement les mêmes. La faible différence provient certainement de l'hypothèse de proportionalité des risques (non-prise en compte pour l'estimateur de Aalen).
+
+Comme dans le cas du modèle de Cox, le modèle de Fine and Gray repose sur des hypothèses (proportionalité des risques et log-linéarité), il est donc moins souple que l'estimateur de Aalen. Cependant, un modèle trop souple est souvent difficile à interpréter et risque d'être trop ajusté aux données, extrapolant moins bien sur de nouvelles données (moins bonne prédictions) : c'est le phénomène de sur-apprentissage du à une sur-paraméterisation.
+D'autre part, comme le modèle de Cox, le modèle de Fine and Gray a l'avantage par rapport à l'estimateur de Aalen de pouvoir considérer des variables continues, des relations non-linéaires,...
+
+
+### Proportionalité des risques
+
+Le modèle de Fine and gray étant basé sur la même idée que le modèle de Cox, c'est un modèle à risques proportionnels. Ils peuvent être vérifiés de la même façon que le modèle de Cox. Cependant, il n'est pas possible que la proportionalité des risques soit valable simultanément pour le modèle de Cox ET le modèle de Fine and Gray (si les 2 tests basés sur les résidus de Schoenfeld ne sont pas significatifs, ce n'est pas forcément que l'hypothèse est valable dans les 2 modèles... La puissance du test est peut être trop faible pour mettre en évidence une différence face à l'hypothèse de proportionalité des risques). L'interprétation des hazard ratios (de sous-distribution et cause-spécifiques) doit se faire avec prudence.
+
+Le test est plus compliqué à programmer étant donné qu'il n'y a pas (pour l'instant) de fonction attitrée. Programmons le à la main :
+
+```{r}
+resTrt<-fitFG1$res[,1] #résidus pour la 1ère variable
+nbDeaths<-sum(data$D==1) 
+resTrt<-resTrt %*% fit1$var*nbDeaths #standardisation des résidus
+temp <- survfit(Surv(data$stime,data$D==1)~1) #KM standardization
+t1 <- temp$surv[temp$n.event > 0]
+t2 <- temp$n.event[temp$n.event > 0]
+km <- rep(c(1, t1), c(t2, 0))
+tim1<-1-km
+resTim1<-tim1-mean(tim1) #centrage des temps d'évènement
+test<-resTim1%*%resTrt
+z<-c(test^2/(diag(fit1$var)*nbDeaths*sum(resTim1^2))) #valeur du Chi2
+p<-pchisq(z,1,lower.tail = FALSE) #p-value
+scatter.smooth(resTrt~(resTim1+mean(tim1)),ylab="Residus",xlab="Temps d'évènement",span=0.5)
+text(0.1,1,paste0("p = ",round(p,3)))
+abline(h=0,col="gray")
+```
+
+La p-value étant $< 0.05$, supposons que l'hypothèse de proportionalité des risques n'est pas respectée. Comme pour le modèle de Cox, l'introduction d'une intéraction avec le temps pourrait résoudre le problème. Pour l'implémenter, il suffit de rajouter les variables pour lesquelles nous souhaitons avoir une intéraction avec le temps dans *cov2* et la fonction de dépendance dans *tf* :
+
+```{r}
+fitFG1tim<-crr(ftime=data$stime,fstatus=data$D,cov1=data$trt,cov2=data$trt,tf=function(x) x) #interaction simple -> data$trt * time
+summary(fitFG1tim)
+```
+
+
+
+
+# Interprétation et présentation des résultats
+
+## Fonction de risque cause-spécifique
+
+Les fonctions de risques cause-spécifiques (estimées par Kaplan-Meier, Cox ou les modèles paramétriques vus précédemment) peuvent se dériver mathématiquement en fonction de "survie". Cette fonction de survie cause-spécifique ne peut cependant pas s'interpréter en termes de probabilité de survivre (ou d'avoir l'évènement si l'on raisonne en CIF) car elle la sur-estime.
+Dans le cadre de l'analyse en présence de risques concurrent, cette fonction n'est donc pas utilisée et on se focalise sur la fonction de risque cause-spécifique qui elle est interprétable en termes de risque instantané. Ce risque ne dépendant pas des risques concurrents, on peut l'interpréter en tant que probabilité de présenter l'évènement au temps *t* sachant que l'on a présenté aucun autre évènement (concurrent) avant.
+Ainsi, si l'on observe un impact d'un traitement significatif sur le risque cause-spécifique, on peut émettre des hypothèses fonctionnelles, biologiques,... Cette analyse est donc destinées à des biologistes/cliniciens qui veulent poser des hypothèses sur comment mieux soigner la maladie qui est étudiée.
+
+## CIF
+
+La CIF représente la probabilité qu'un individu présente un évènement avant un temps *t*. Comme vu précédemment, cette probabilité dépend des risques cause-spécifiques des autres évènements. Si l'on diminue le risque de décès par cancer à l'aide d'un traitement, les individus vivrons plus longtemps, ce qui les expose plus longtemps aux risques d'autres types de décès, et donc augmente par effet de levier leur probabilité de décéder d'une autre cause.
+Ainsi, si l'on observe une augmentation significative de la CIF du décès par autre cause, nous ne pouvons pas émettre d'hypothèse fonctionnelles, biologiques,... sur l'impact du traitement sur l'augmentation du risque de décès par autre cause (s'il n'y a d'augmentation de son risque cause-spécifique).
+Cette mesure n'est donc pas destinée à des cliniciens, mais plutôt à des personnes ayant besoin d'estimations d'effectifs au cours du temps, sans avoir besoin d'explication sur la relation de causalité, par exemple : responsables de la logistique (prévision des stocks des médicaments à commander, nombre de chambre supplémentaire (si patients atteinds de cancer survivent plus longtemps, il doivent peut-être être hospilalisés plus longtemps),...), responsables de politiques publiques (si l'on met en oeuvre une intervention publique, quels sont les impacts qui pourrait être attendus ?),...
+
+
+## Présentation des résultats
+
+Les 2 risques (cause-spécifique et sous-distribution (CIF)) étant interdépendant, il faut toujours raisonner en prenant en compte les 2. Afin d'aider l'interprétation des résultats par le lecteur, il est conseillé de présenter les résultats pour tous les risques cause-spécifiques et au moins celui de la CIF de l'évènement d'intérêt.
+
+
+
+
+
+
+
+
+
+
+
+
+
