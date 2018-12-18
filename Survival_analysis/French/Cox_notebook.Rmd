@@ -284,7 +284,7 @@ lines(lowess(veteran$age,resMart),col=2)
 abline(h=0)
 ```
 
-Les résidus de martingale sont asymétriques (car compris entre $-\infty$ et $+1$), pouvant écraser la courbe et compliquer l'interprétation. Les résidus de la déviance sont une version "symétrisée" des résidus de martingale, dont les valeurs sont centrées sur 0 et comprises entre $-1$ et $+1$, permettant de mieux apprécier les tendances des résidus :
+Les résidus de martingale sont asymétriques (car compris entre $-\infty$ et $+1$), pouvant écraser la courbe et compliquer l'interprétation. Les résidus de la déviance sont une version "symétrisée" des résidus de martingale, dont les valeurs sont centrées sur 0, permettant de mieux apprécier les tendances des résidus :
 
 ```{r}
 resDev<-residuals(fitCoxAge,"deviance")
