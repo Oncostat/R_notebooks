@@ -193,6 +193,7 @@ Ou même encore plus complexe, en utilisant des splines :
 ```{r}
 summary(fitCox3<-coxph(Surv(timeMon,status)~age55+tt(age55),data=veteran,tt=function(x,t,...) pspline(x*t)))
 ```
+
 Mais attention à la complexification : cela n'améliore pas toujours les performances du modèle et cela devient très vite difficile à interpréter !
 
 
@@ -391,6 +392,7 @@ AIC(fitCoxAgeSp)
 BIC(fitCoxAge)
 BIC(fitCoxAgeSp)
 ```
+
 Ici, nous avons un désacord entre ces 2 critères. Cependant, la différence est faible, il est donc plus raisonnable de choisir le modèle le plus interprétable, d'autant plus que la forme de la spline est très influencée par ses extrêmités, pour lesquelles nous avons peu de confiance en leurs tendances (du fait du faible nombre d'observations pour les âges les plus faibles et les plus avancés, qui s'observe par l'élargissement de la bande de confiance).
 
 ## Note sur la grande dimension
@@ -447,7 +449,7 @@ Modèle de Cox multivarié avec plusieurs variables.
 ```
 
 
-## Ajuster un modèle de Cox multivarié sur les variables *age* et *treat*
+## Ajuster un modèle de Cox multivarié sur les variables *age* et *prior*
 
 ```{r}
 
@@ -462,7 +464,7 @@ Calculer la (log)vraisemblance du modèle et le nombre de ddl
 
 
 
-## Ajuster un modèle de Cox multivarié sur les variables *age*, *treat* et *cell*
+## Ajuster un modèle de Cox multivarié sur les variables *age*, *prior* et *celltype*
 
 ```{r}
 
