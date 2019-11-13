@@ -1,0 +1,222 @@
+---
+title: "Méthodes descriptives et modèles non-paramétriques"
+output: html_notebook
+---
+
+
+
+
+
+
+# Exemple fil rouge
+
+## Description
+
+Veterans' Administration Lung Cancer study : Essai randomisé comparatif de deux traitements du cancer du poumon : standard vs test.
+
+Objectif de l’essai : y a-t-il une différence significative de survie entre les deux groupes de traitement (standard vs test)?
+
+Quelques informations supplémentaires :
+
+```{r}
+library(survival) #chargement de la bibliothèque contentant la base de données et les fonctions pour l'analyse de survie
+data(veteran) #chargement de la base de données
+?veteran  #affiche l'aide la concernant
+```
+
+
+## Quelques chiffres
+
+Pour obtenir des détails sur la base, commençons par regarder à quoi correspondent les différentes colonnes. Pour afficher les premières lignes :
+
+```{r}
+head(veteran)
+```
+
+Comment sont codées les différentes variables ?
+
+```{r}
+str(veteran)
+```
+
+Quelques chiffres les résumant :
+
+```{r}
+summary(veteran)
+```
+
+
+
+
+
+# Analyse de survie non-ajustée
+
+## Format des données
+
+Afin de pouvoir être utilisées par les fonctions du packages *survival*, les données doivent être transformées. Pour cela, il faut utiliser la fonction *Surv* (attention à la majuscule !)
+
+```{r}
+Surv(veteran$time, veteran$status)
+```
+
+On remarque que le temps de suivi est suivi d'un "+" lorsque le suivi de l'individu est censuré (status = 0).
+
+
+## Estimateur de Kaplan-Meier
+
+Avec ce format, nous pouvons utiliser la fonction *survfit* afin de calculer l'estimateur de Kaplan-Meier :
+
+
+```{r}
+#KM<-survfit(Surv(veteran$time, veteran$status) ~ NULL)
+KM<-survfit(Surv(time, status) ~ 1,data=veteran) #équivalent à la ligne précédente, mais gardons 1 par cohérence avec la suite (modèles paramétriques (et tous les glm en général) où 1 correspond à l'intercept du modèle)
+summary(KM)
+
+```
+
+Nous retrouvons ici la table vue en cours du calcul des probabilités de survie à chaque temps d'évènement. Attention si vous voulez refaire le calcul à la main, le nombre de censures à chaque temps n'est pas affiché.
+
+## Interval de confiance
+
+Plusieurs méthodes ont été proposées pour le calcul de l'intervalle de confiance. D'après plusieurs études de simulation, la méthode proposée par défaut par la fonction *survfit* n'est pas la meilleure. Aussi, nous pouvons utiliser la méthode *log-log*, plus robuste en utilisant l'option *conf.type* :
+
+```{r}
+KM<-survfit(Surv(time, status) ~ 1,data=veteran,conf.type="log-log") 
+summary(KM)
+```
+
+Une autre méthode robuste est celle proposée par Rothman (1978). Elle nécessite cependant d'utiliser un autre package, *km.ci* :
+
+```{r}
+library(km.ci)
+rothmanCI <- km.ci(KM, conf.level=0.95, method="rothman") #on réutilise l'objet KM pour en calculer un autre IC
+summary(rothmanCI)
+```
+
+
+## Médiane de survie
+
+Comme indiqué en cours, la médiane de survie ne se calcule pas simplement en prenant la médiane des temps disponibles, mais à partir de l'estimateur de Kaplan-Meier. Nous pouvons l'obtenir très facilement à partir de l'objet que nous avons créé précédemment :
+
+```{r}
+KM
+```
+
+Cette médiane nous est fournie avec son intervalle de confiance à 95% : 80 [52; 100]
+
+
+
+
+
+
+## Affichage des courbes de survie
+
+### Affichage de la courbe
+
+Pour afficher la courbe, comme souvent, il suffit d'utiliser l'objet *KM* dans une fonction plot.
+
+```{r}
+plot(survfit(Surv(time, status) ~ 1,data=veteran) ,xlab="Time from inclusion (days)", ylab="Probability of survival", main="Overall survival")
+plot(KM,xlab="Time from inclusion (days)", ylab="Probability of survival", main="Overall survival")
+plot(rothmanCI,xlab="Time from inclusion (days)", ylab="Probability of survival", main="Overall survival")
+```
+
+
+L'IC correspond à celui demandé dans la fonction survfit utilisée pour la création de l'objet KM (ou rothmanCI). Vous verrez qu'il y a une légère différence entre les 3 courbes, la première utilisant la méthode log (méthode par défaut), la seconde utilisant la méthode log-log, et la troisième utilisant la méthode de Rothman.
+
+Afin d'embellir un peu notre rapport, nous pouvons utiliser le package *survminer* qui se base sur le package *ggplot2* pour fournir de plus jolis graphiques :
+```{r}
+library(survminer)
+ggsurvplot(survfit(Surv(time, status) ~ 1,data=veteran))
+ggsurvplot(KM)
+ggsurvplot(rothmanCI)
+```
+
+Tout comme la méthode précédente, nous voyons que l'IC dépend bien de celui utilisé.
+
+Le gros avantage de ce package est qu'il permet d'afficher une table d'effectifs sous le graphique, très souvent demandée pour les articles scientifiques :
+
+```{r}
+ggsurvplot(KM,risk.table = TRUE)
+ggsurvplot(KM,risk.table = TRUE,break.time.by = 100) #l'option breaktime est là pour indiquer à quels moment l'effectif doit être calculé pour la table
+```
+
+
+
+
+### Echelle de temps
+
+Si le temps en jour ne nous convient pas, il suffit d'effectuer une simple transformation dans la fonction survfit pour obtenir l'échelle en mois ou en années :
+```{r}
+ggsurvplot(survfit(Surv(time, status) ~ 1,data=veteran,conf.type="log-log"),xlab="Time in days")
+ggsurvplot(survfit(Surv(time/30.4375, status) ~ 1,data=veteran,conf.type="log-log"),xlab="Time in months")
+ggsurvplot(survfit(Surv(time/365.25, status) ~ 1,data=veteran,conf.type="log-log"),xlab="Time in years")
+```
+
+Bien sur, cela serait plus précis d'utiliser la fonction *difftime* à partir des dates que vous avez utilisées pour calculer vos temps.
+
+
+
+# Analyse de survie ajustée et test du logrank
+
+Reprenons l'objectif de l'étude qui est la comparaison des 2 traitement. Dans un soucis de simplicité, nous ne présenterons que les IC "log-log".
+
+## Estimateur de Kaplan-Meier
+
+L'estimateur de Kaplan-Meier peut être ajusté en remplaçant le "1" dans la formule par le nom de la variable d'intérêt, ici *trt* :
+
+```{r}
+KM<-survfit(Surv(time, status) ~ trt,data=veteran)
+#summary(KM) #affiche les tables de calcul des probabilités, 1 par traitement (non affichées ici par soucis de clarté)
+```
+
+Comme précédemment, nous pouvons obtenir la médiane de survie et son IC95% pour chaque groupe, simplement en écrivant le nom de l'objet créé précédément :
+```{r}
+KM
+```
+
+## Test du logrank
+
+La fonction pour réaliser le test du logrank est la fonction *survdiff* qui s'utilise comme la fonction survfit :
+
+```{r}
+survdiff(Surv(time, status) ~ trt,data=veteran)
+```
+
+Ici, nous n'observons pas de différence significative entre les 2 bras.
+Pour une valeur précise de la p-value, il suffit d'extraire la valeur de la statistique de test de l'objet *survdiff*, et de calculer la p-value à partir du test du chi2 :
+
+```{r}
+1-pchisq(survdiff(Surv(time, status) ~ trt,data=veteran)$chisq,1)
+```
+
+
+
+## Affichage des courbes
+
+Comme précédemment, il suffit d'utiliser la fonction ggsurvplot, qui permet également d'afficher la p-value du logrank :
+
+```{r}
+ggsurvplot(KM,conf.int = TRUE,risk.table = TRUE,break.time.by = 100,pval = TRUE)
+```
+
+
+
+
+
+
+# A vous de jouer
+
+## Exercice 1
+
+Refaites les manipulations du paragraphe précédent, mais ajustez sur la variable *celltype* au lieu du traitement.
+Les groupes sont-ils différents ?
+Que préconisez-vous de faire dans cette situation ?
+
+
+## Exercice 2
+
+Ajustez sur *trt* et *celltype*
+
+
+

@@ -1,0 +1,483 @@
+---
+title: "Modèles de survie paramétriques"
+output: html_notebook
+---
+
+Ceci est un "notebook". Il permet d'écrire du code au milieu du texte et d'afficher son résultat lorsque le document est compilé. Vous pouvez également utiliser les icones en haut à droite de chaque "chunk" (partie où se trouve le code), par exemple, la flèche verte permet de ne recompiler que cette partie.
+
+Ce document est écrit en language markdown. Les bases qui vous permettront de comprendre la sytaxe sont juste que le "#" permet de définir le niveau du titre ("#" = titre 1; "##" = titre 1.1; "###" = titre 1.1.1;...). Le code R est écrit entre 2 balises, une d'ouverture du chunk et une de fermeture. Exemple:
+
+```{r}
+head(cars)
+```
+
+Le résultat du code s'affiche en dessous si vous compilez le document, ou juste ce chunck en cliquant sur la flèche verte.
+
+Finalement, lorsque votre document est terminé, vous pouvez obtenir une version clean en cliquant sur le bouton "preview" ou en tapant *Ctrl+Shift+K*. Un fichier de type html se trouve maintenant à côté de votre fichier Rmd, que vous pouvez garder pour vous ou envoyer à quelqu'un, il suffit d'un navigateur internet (même sans connexion) pour pouvoir l'afficher.
+
+Revenons maintenant au cours...
+
+
+
+# Pourquoi utiliser un modèle paramétrique ?
+
+L'utilisation de modèles non-paramétrique ou semi-paramétrique (ex : Cox) présentent de nombreux avantages, mais également de nombreuses limites du fait de l'absence d'une forme structurée. En effet, le risque de base estimé par ces modèles est très fidèles aux données, mais trop pour pouvoir extrapoler à de nouvelles données.
+
+Mais à quoi cela ressemble-t-il ?
+
+```{r}
+library(survival)
+pts <- 0:100/30
+sc <- 2
+sh <- 1.5
+XLAB = 'Temps (t)'
+N <- 100
+set.seed(1)
+times <- rweibull(N, sh, sc)
+event <- rep(1, N)
+par(mfrow=c(1, 3), mar = c(5, 5, 2, 2) + .1, bty='l')
+plot(survfit(Surv(times, event) ~ 1), ylim=0:1,main = 'Probabilité de survie\nS(t) = P(T > t)',ylab = '',xlab = XLAB, lwd=2, col='red', xmax = max(pts), conf.int = FALSE)
+plot(0,0, ty='l',ylim=0:1,main = 'Densité de probabilité\nf(t) = -dS(t) / dt',ylab = '', xlab = XLAB, lwd=2, col='white')
+text(0,0.5,"?",cex=10)
+plot(0,0, ty='l',ylim=0:1,main = 'Risque instantané\nh(t) = f(t) / S(t)',ylab = '', xlab = XLAB, lwd=2, col='white')
+text(0,0.5,"?",cex=10)
+
+```
+
+
+A chaque temps t, la pente de cette fonction est égale à 0 lorsqu'il n'y a pas d'évènement et à $\infty$ lorsqu'il y a un évènement. Lorsque l'on dérive cette distribution,on a donc :
+
+```{r}
+par(mfrow=c(1, 3), mar = c(5, 5, 2, 2) + .1, bty='l')
+plot(survfit(Surv(times, event) ~ 1), ylim=0:1,main = 'Probabilité de survie\nS(t) = P(T > t)',ylab = '',xlab = XLAB, lwd=2, col='red', xmax = max(pts), conf.int = FALSE)
+plot(times[event==1],rep(0,sum(event)),ylim=0:1,main = 'Densité de probabilité\nf(t) = -dS(t) / dt',ylab = '', xlab = XLAB, lwd=2, col='red')
+legend("topright","Event times",pch=1,col='red',bty="n")
+abline(v=times[event==1],col="grey")
+plot(0,0, ty='l',ylim=0:1,main = 'Risque instantané\nh(t) = f(t) / S(t)',ylab = '', xlab = XLAB, lwd=2, col='white')
+text(0,0.5,"?",cex=10)
+
+```
+Où chaque trait vertical correspond à une densité allant vers $\infty$ (car 1/0=$\infty$). La fonction de risque est donc également :
+
+```{r}
+par(mfrow=c(1, 3), mar = c(5, 5, 2, 2) + .1, bty='l')
+plot(survfit(Surv(times, event) ~ 1), ylim=0:1,main = 'Probabilité de survie\nS(t) = P(T > t)',ylab = '',xlab = XLAB, lwd=2, col='red', xmax = max(pts), conf.int = FALSE)
+plot(times[event==1],rep(0,sum(event)),ylim=0:1,main = 'Densité de probabilité\nf(t) = -dS(t) / dt',ylab = '', xlab = XLAB, lwd=2, col='red')
+legend("topright","Event times",pch=1,col='red',bty="n")
+abline(v=times[event==1],col="grey")
+plot(times[event==1],rep(0,sum(event)),ylim=0:1,main = 'Risque instantané\nh(t) = f(t) / S(t)',ylab = '', xlab = XLAB, lwd=2, col='red')
+legend("topright","Event times",pch=1,col='red',bty="n")
+abline(v=times[event==1],col="grey")
+
+```
+
+
+Dans un autre contexte, prenons les poids de souris mesurés lors d'une expérience. Utiliser une méthode non-paramétrique similaire reviendrait à avoir une distribution telle que celle-ci :
+
+```{r}
+N <- 50
+set.seed(1)
+x <- rnorm(N,20,7.5)
+plot(x,rep(0,length(x)),ylim=0:1,main = 'Densité de probabilité',ylab = '', xlab = "Mouse weight (g)", lwd=2, col='red',bty='l')
+legend("topright","Observations",pch=1,col='red',bty="n")
+abline(v=x,col="grey")
+
+```
+
+Il est clair qu'il est impossible de faire de la prédiction de nouvelles observations à partir de cette distribution. De ce fait, il est courant de placer une densité de probabilité sur ces points, représentant leur densité/concentration :
+
+```{r}
+plot(x,rep(0,length(x)),ylim=c(0,0.1),main = 'Densité de probabilité',ylab = '', xlab = "Mouse weight (g)", lwd=2, col='red',bty='l')
+legend("topright","Observations",pch=1,col='red',bty="n")
+abline(v=x,col="grey")
+curve(dnorm(x,20,7.5),add=T,lwd=2,col='red')
+```
+
+
+Ici, on place un modèle gaussien sur les poids des souris. A partir de cela, nous pouvons :
+- calculer facilement des statistiques correspondantes à ces distributions (moyenne, médiane,...) grâce aux formules analytiques
+- faire de la prédiction
+- extrapoler en dehors des limites de l'échantillon
+- réaliser des études de simulations en tirant au hasard des valeurs dans cette distribution pour créer une population "synthétique" (souvent utilisée pour tester la robustesse d'un modèle ou faire du calcul de taille d'échantillon)
+
+Cela permet également de restreindre le modèle pour limiter le sur-apprentissage, i.e. permettre d'avoir un modèle qui pourra extrapoler au delà de sa population d'apprentissage (cf cours modèles prédictifs).
+
+Dans le cadre de la survie, nous aurons une fonction de survie plus lisse qu'un estimateur non-paramétrique et nous pouvons définir la densité de probabilité et la fonction de risque instantané :
+
+```{r}
+pts <- 0:100/30
+sc <- 2
+sh <- 1.5
+XLAB = 'Temps (t)'
+#par(xaxs='i', mfrow=c(1, 3), bty='l')
+par( mfrow=c(1, 3), bty='l')
+plot(pts, pweibull(pts, sh, sc, lower.tail = FALSE), ty='l', ylim=0:1,main = 'Probabilité de survie\nS(t) = P(T > t)',ylab = '', xlab = XLAB, lwd=2, col='red')
+plot(pts, dweibull(pts, sh, sc), ty='l',main = 'Densité de probabilité\nf(t) = -dS(t) / dt',ylab = '', xlab = XLAB, lwd=2, col='red')
+plot(pts, dweibull(pts, sh, sc) / pweibull(pts, sh, sc, lower.tail = FALSE),ty='l', main = 'Risque instantané\nh(t) = f(t) / S(t)',ylab = '', xlab = XLAB, lwd=2, col='red')
+
+```
+
+
+
+
+# Dataset
+
+Pour cette partie du TP, nous utiliserons le data "kidney" disponible dans le package survival.
+
+```{r}
+library('survival')
+data('kidney')
+head(kidney)
+```
+
+
+
+# Distributions de survie paramétriques
+
+## Récapitulatif
+
+Dans ce TP, nous utiliserons les paraméterisations du package survival qui correspondent également à celle que vous pourrez rtetrouver dans certains documents, y compris les pages wikipedia de ces distributions. Afin de ne pas vous perdre, le tableau ci-dessous fait compare les fonctions de survie associées par rapport à celles que vous avez pu voir en cours.
+
+
+| Famille          | Package survival | Cours            |
+|------------------|------------------|------------------|
+| Exponentielle    |$\exp(- \lambda t)$|$\exp(- \lambda t)$|
+| Weibull          |$\exp(- (\frac{t}{\lambda})^{\frac{1}{\sigma}})$|$\exp(-(\lambda t)^\frac{1}{\sigma})$|
+| Log-normal       |$1 - \Phi\left(\frac{\ln(t)-\mu}\sigma \right)$| - |
+| Log-logistique   |$\frac{1}{1+\exp(\frac{\ln(t) - \mu)}{\sigma})}$| $\frac{1}{1+(\lambda t)^{\gamma}}$                  |
+
+
+
+
+## Estimation de paramètres
+
+### Distribution exponentielle
+
+```{r}
+fit_exp<-survreg(Surv(time,status) ~ 1, kidney,dist="exponential")
+beta0_exp<-fit_exp$coef #extraction de la valeur de beta0
+lambda_exp<-exp(-beta0_exp)
+
+```
+
+### Distribution de Weibull
+
+```{r}
+fit_weib<-survreg(Surv(time,status) ~ 1, kidney,dist="weibull")
+beta0_weib<-fit_weib$coef #extraction de la valeur de beta0
+lambda_weib<-exp(beta0_weib)
+scale_weib<-fit_weib$scale
+```
+
+
+### Distribution de log-normale
+
+```{r}
+fit_logNorm<-survreg(Surv(time,status) ~ 1, kidney,dist="lognormal")
+mu_logNorm<-fit_logNorm$coef
+scale_logNorm<-fit_logNorm$scale
+```
+
+### Distribution de log-logistique
+
+```{r}
+fit_logLogi<-survreg(Surv(time,status) ~ 1, kidney,dist="loglogistic")
+mu_logLogi<-fit_logLogi$coef
+scale_logLogi<-fit_logLogi$scale
+```
+
+
+
+
+
+
+## Représentation graphique
+
+
+```{r}
+#par(mar = c(4, 4, .5, 0) + .1)
+plot(survfit(Surv(time, status) ~ 1, data = kidney), conf.int = FALSE, xlab = 'Temps, t',ylab = bquote(paste(S(t))), col = "black")
+curve(exp(-lambda_exp*x),add=T,col='red')
+curve(exp(-(x/lambda_weib)^(1/scale_weib)),add=T,col="green")
+curve(1-pnorm((log(x)-mu_logNorm)/scale_logNorm),add=T,col="blue")
+curve(1/(1+exp((log(x)-mu_logLogi)/scale_logLogi)),add=T,col="cyan")
+legend("topright",c("Exponential","Weibull","Log normal","Log logistic"),col=c("red","green","blue","cyan"),lty=1,bty="n")
+```
+
+
+
+## Médiane de survie
+
+L'avantage d'avoir une distribution paramétrique et que nous avons des solutions analytiques qui nous permettent d'obtenir des statistiques facilement à partir de quelques formules bien connues (moyenne,...).
+La médiane de survie s'obtient facilement à partir de la fonction de répartition. Sous R, les fonctions des distribution usuelles peuvent être utilisée :
+```{r}
+qexp(0.5,lambda_exp)
+qweibull(0.5,1/scale_weib,lambda_weib)
+qlnorm(0.5,mu_logNorm,scale_logNorm)
+```
+(Pour la log-logistique, d'autres packages sont nécessaire, ex : flexsurv)
+
+On peut vérifier sur le plot
+
+```{r}
+par(mar = c(4, 4, .5, 0) + .1)
+plot(survfit(Surv(time, status) ~ 1, data = kidney), conf.int = FALSE, xlab = 'Temps, t',ylab = bquote(paste(S(t))), col = "black")
+curve(exp(-lambda_exp*x),add=T,col='red')
+curve(exp(-(x/lambda_weib)^(1/scale_weib)),add=T,col="green")
+curve(1-pnorm((log(x)-mu_logNorm)/scale_logNorm),add=T,col="blue")
+curve(1/(1+exp((log(x)-mu_logLogi)/scale_logLogi)),add=T,col="cyan")
+legend("topright",c("Exponential","Weibull","Log normal","Log logistic"),col=c("red","green","blue","cyan"),lty=1,bty="n")
+abline(h=0.5,col="gray")
+abline(v=c(qexp(0.5,lambda_exp),qweibull(0.5,1/scale_weib,lambda_weib),qlnorm(0.5,mu_logNorm,scale_logNorm)),col=2:4)
+
+```
+
+
+
+
+## Extrapolation
+
+
+```{r}
+par(mar = c(4, 4, .5, 0) + .1)
+plot(survfit(Surv(time, status) ~ 1, data = kidney),xlim=c(0,1000), conf.int = FALSE, xlab = 'Temps, t',ylab = bquote(paste(S(t))), col = "black")
+curve(exp(-lambda_exp*x),add=T,col='red')
+curve(exp(-(x/lambda_weib)^(1/scale_weib)),add=T,col="green")
+curve(1-pnorm((log(x)-mu_logNorm)/scale_logNorm),add=T,col="blue")
+curve(1/(1+exp((log(x)-mu_logLogi)/scale_logLogi)),add=T,col="cyan")
+legend("topright",c("Exponential","Weibull","Log normal","Log logistic"),col=c("red","green","blue","cyan"),lty=1,bty="n")
+
+```
+
+
+
+
+
+## Prédiction
+
+Réalisons des prédictions pour nos observations :
+
+```{r}
+predict(fit_weib)
+```
+
+On peut constater que la moyenne de la distribution de Weibull est assigné à toutes les observations. Ces valeurs seront modifiées en fonction des facteurs d'ajustement pris en compte dans le modèle. Ex :
+
+```{r}
+fit_weib2<-survreg(Surv(time,status) ~ sex, kidney,dist="weibull")
+#summary(fit_weib2)
+#prediction pour sex = 0
+print(paste0("Prédiction pour sex=0 : ",predict(fit_weib2,newdata = list(sex=0))))
+#prediction pour sex = 1
+print(paste0("Prédiction pour sex=1 : ",predict(fit_weib2,newdata = list(sex=1))))
+
+```
+Mais quand on regarde le graphique, il y a peut être un meilleur modèle...
+
+```{r}
+plot(survfit(Surv(time, status) ~ sex, data = kidney), conf.int = FALSE, xlab = 'Temps, t',ylab = bquote(paste(S(t))), col=1:2)
+p<-seq(0.01, 0.99, by=.01)
+lines(x = predict(fit_weib2, type = "quantile", p = p,newdata=list(sex=rep(0,length(p))))[1,],y = rev(p),lty=2)
+lines(x = predict(fit_weib2, type = "quantile", p = p,newdata=list(sex=rep(1,length(p))))[1,],y = rev(p),col=2,lty=2)
+```
+
+
+
+## Comparaison des modèles
+
+### Comparaison "intra-distribution"
+
+Le dataset n'ayant pas beaucoup d'observations, le test de rapport de vraisemblance est à privilégier.
+```{r}
+anova(fit_weib,fit_weib2)
+```
+
+Nous pouvons également regarder les critères AIC et BIC (plus faible est meilleur) :
+
+```{r}
+#AIC
+extractAIC(fit_weib)
+extractAIC(fit_weib2)
+#BIC
+extractAIC(fit_weib,k=log(nrow(kidney)))
+extractAIC(fit_weib2,k=log(nrow(kidney)))
+```
+
+Tous les critères indiquent que l'ajustement sur la variable sex permettent d'améliorer les performances du modèle.
+
+
+### Comparaison "inter-distribution"
+
+#### Comparaison modèles emboités
+
+Le modèle exponentiel correspond au modèle de Weibull pour $\sigma=1$. Ces 2 modèles sont donc emboités et nous pouvons réaliser le test de rapport de vraisemblance.
+
+```{r}
+anova(fit_exp,fit_weib)
+```
+
+Regardons également les autres critères :
+
+```{r}
+#AIC
+extractAIC(fit_exp)
+extractAIC(fit_weib)
+#BIC
+extractAIC(fit_exp,k=log(nrow(kidney)))
+extractAIC(fit_weib,k=log(nrow(kidney)))
+```
+
+Dans tous les cas, les critères indique que le modèle de Weibull n'est pas meilleur que le modèle exponentiel. Le modèle exponentiel, plus simple, sera donc à privilégier.
+
+
+
+
+
+#### Comparaison modèles non-emboités
+
+Le rapport de vraisemblance n'est plus valable dans ce cas. Utilisons donc les autres critères :
+
+```{r}
+k=log(nrow(kidney))
+data.frame(model=c("Exponentiel","Weibull","log-normal","log-logistique"),
+           AIC=c(extractAIC(fit_exp)[2],extractAIC(fit_weib)[2],extractAIC(fit_logNorm)[2],extractAIC(fit_logLogi)[2]),
+           BIC=c(extractAIC(fit_exp,k=k)[2],extractAIC(fit_weib,k=k)[2],extractAIC(fit_logNorm,k=k)[2],extractAIC(fit_logLogi,k=k)[2]))
+```
+
+Le modèle log-normal a le meilleur AIC, alors que le modèle exponentiel a le meilleur BIC. Cependant, les différences sont très faibles. Comme précédemment, le modèle le plus simplte (exponentiel) sera donc à favoriser.
+
+
+Cependant, en prennant en compte un ajustement sur la variable sex, le modèle log-normal sera à privilégier.
+
+```{r}
+fit_exp2<-survreg(Surv(time,status) ~ sex, kidney,dist="exponential")
+fit_logNorm2<-survreg(Surv(time,status) ~ sex, kidney,dist="lognormal")
+fit_logLogi2<-survreg(Surv(time,status) ~ sex, kidney,dist="loglogistic")
+k=log(nrow(kidney))
+data.frame(model=c("Exponentiel","Weibull","log-normal","log-logistique"),
+           AIC=c(extractAIC(fit_exp2)[2],extractAIC(fit_weib2)[2],extractAIC(fit_logNorm2)[2],extractAIC(fit_logLogi2)[2]),
+           BIC=c(extractAIC(fit_exp2,k=k)[2],extractAIC(fit_weib2,k=k)[2],extractAIC(fit_logNorm2,k=k)[2],extractAIC(fit_logLogi2,k=k)[2]))
+```
+
+
+
+
+## Simulations
+
+##
+
+Prenons l'exemple de la distribution exponentielle avec un intercept $-log(\lambda)$ égal à 5, dont La distribution f(t) peut être affichée avec :
+
+```{r}
+curve(dexp(x,exp(-5)),0,500)
+```
+
+Générons des temps de survie selon ce modèle :
+
+```{r}
+set.seed(1)
+x<-rexp(1000,exp(-5)) #génération de 1000 valeurs selon cette distribution
+hist(x,breaks=100,freq=F)
+curve(dexp(x,exp(-5)),add=T) #rajouter la distribution théorique sur l'histogramme
+```
+
+Cependant, pour réaliser une étude de simulation, il ne faut également pas oublier de générer des temps de censure !
+
+```{r}
+set.seed(1)
+T<-rexp(500,exp(-5))
+cens<-rexp(500,exp(-6)) #paramètres à changer en fonction du taux de censure désiré, potentiellement à regarder en terme analytique
+Y<-pmin(T,cens) #obtenir les temps min pour chaque observation entre censure et temps d'évènement
+delta<-1*I(T<cens) #Indicatrice d'évènement 1 si temps d'évènement < temps de censure, 0 sinon
+summary(fit<-survreg(Surv(Y,delta) ~ 1,dist="exponential"))
+print("Simulated intercept: 6")
+print(paste0("Estimated intercept: ",coef(fit)," with 95% confidence interval between ",confint(fit)[1]," and ",confint(fit)[2]))
+```
+
+La valeur estimée est loin de la valeur théorique. Cependant, il faut se rappeler de la définition de l'intervalle de confiance qui contient la valeur théorique que dans 95% des cas !
+Pour vérifier la robustesse du modèle, il faut réaliser de nombreuses fois ce processus et vérifier que la distribution des paramètres est bien centrée sur les paramètres théoriques (simulés) :
+
+```{r}
+check<-rep(0,1000)
+for(i in 1:1000){
+  set.seed(i)
+  T<-rexp(500,exp(-5))
+  cens<-rexp(500,exp(-6)) #paramètres à changer en fonction du taux de censure désiré, potentiellement à regarder en terme analytique
+  Y<-pmin(T,cens) #obtenir les temps min pour chaque observation entre censure et temps d'évènement
+  delta<-1*I(T<cens) #Indicatrice d'évènement 1 si temps d'évènement < temps de censure, 0 sinon
+  fit<-survreg(Surv(Y,delta) ~ 1,dist="exponential")
+  if(i==1) print(summary(fit))
+  CI<-confint(fit)
+  check[i]<-ifelse(5>=CI[1] & 5<=CI[2],1,0)
+}
+paste0(mean(check)*100,"% des IC95% contiennent la valeur théorique")
+```
+
+L'intervalle de confiance à 95% contient la valeur théorique dans ~95% des simulations, ce qui est le résultat attendu.
+
+Cette procédure peut être utilisée pour vérifier la robustesse d'un nouveau développement statistique, ou pour faire du calcul d'effectif nécessaire lorsqu'il n'y a pas de formule analytique. A titre d'exemple, avec le modèle exponentiel (pour lequel il existe une formule établie, à privilégier aux simulations !), supposons que l'on suppose un coefficient de 2 associé à une variable explicative équitablement répartie dans la population :
+
+
+```{r}
+N<-500 #taille de la population
+signif<-rep(0,1000)
+for(i in 1:1000){
+  set.seed(i)
+  X<-sort(rep(0:1,N/2))
+  T<-rexp(N,exp(-(5+0.5*X)))
+  cens<-rexp(N,exp(-6)) #paramètres à changer en fonction du taux de censure désiré, potentiellement à regarder en terme analytique
+  Y<-pmin(T,cens) #obtenir les temps min pour chaque observation entre censure et temps d'évènement
+  delta<-1*I(T<cens) #Indicatrice d'évènement 1 si temps d'évènement < temps de censure, 0 sinon
+  fit<-survreg(Surv(Y,delta) ~ X,dist="exponential")
+  CI<-confint(fit)[2,]
+  signif[i]<-ifelse(summary(fit)$table[2,4]<0.05,1,0)
+}
+paste0("Le coefficient est statistiquement significatif dans ",mean(signif)*100,"% des simulations (= puissance)")
+```
+
+La puissance est $>$ 99% ! Mais si nous dimunuont l'effectif :
+
+```{r}
+N<-100 #taille de la population
+signif<-rep(0,1000)
+for(i in 1:1000){
+  set.seed(i)
+  X<-sort(rep(0:1,N/2))
+  T<-rexp(N,exp(-(5+0.5*X)))
+  cens<-rexp(N,exp(-6)) #paramètres à changer en fonction du taux de censure désiré, potentiellement à regarder en terme analytique
+  Y<-pmin(T,cens) #obtenir les temps min pour chaque observation entre censure et temps d'évènement
+  delta<-1*I(T<cens) #Indicatrice d'évènement 1 si temps d'évènement < temps de censure, 0 sinon
+  fit<-survreg(Surv(Y,delta) ~ X,dist="exponential")
+  CI<-confint(fit)[2,]
+  signif[i]<-ifelse(summary(fit)$table[2,4]<0.05,1,0)
+}
+paste0("Le coefficient est statistiquement significatif dans ",mean(signif)*100,"% des simulations (= puissance)")
+```
+
+La puissance est beaucoup plus faible ! Une conséquence similaire pourrait être observée si nous diminuions la taille de l'effet.
+Pour obtenir la taille idéale, il faut tester différent N jusqu'à ce que la puissance atteigne le seuil désiré (habituellement 80%), ce qui peu prendre beaucoup de temps (de temps de programmation et de calcul), surtout si le modèle est complexe. C'est pourquoi la formule analytique, si elle existe, est a privilégier.
+
+
+
+
+
+# A vous de jouer
+
+## Statistiques associées aux distributions
+
+Selon les 4 modèles (non-ajusté) :
+- Quel est le temps de survie associé à une probabilité de survie de 25% ?
+- Extrapolation : Quelle est la probabilité de survie estimée pour t=1000 ?
+
+
+## Prise en compte d'autres facteurs
+
+Ajustez les modèles sur les variables age, sex et disease.
+
+
+## Sélection de variable
+
+Comparez les modèles et leurs sous-modèles (avec moins de variables) à l'aide du rapport de vraisemblance et des critères AIC et BIC
+
+
+
