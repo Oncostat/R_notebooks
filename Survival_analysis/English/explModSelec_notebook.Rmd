@@ -1,0 +1,329 @@
+---
+title: "Model selection for explanatory model development"
+output:
+  html_notebook:
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+---
+
+# Introduction
+
+Model selection is inherent to the statistician work which aims to explain the observed data. According to a model, we want to infer the impact of different factors (estimate parameters and their variances) on the variable of interest. This impact should be evaluated differently according to the aim of the model.
+
+From an explanatory point of view, we suppose a model of the relations between **explanatory variables** and the **variable of interest**, and estimate the parameters quantifying these relations. We usually include known risk factors, and exploratory variables we want to evaluate, and care about **confusing factor** for interpretability. This interpretability relies on our consideration that the model is the "reality" which has generated the data. That's why we really care about the model assumption checking (e.g. proportional hazard or log-linearity), to support this strong assumption.
+
+
+In this notebook, we will describe the strategy of the development of explanatory model (for predictive modeling, see predModSelec_notebook.Rmd notebook). To simplify the illustration of the different strategies and problems, we will focus on the linear model, which is the basic structure of the generalized linear models (linear, logistic, Poiss,... regression).
+
+
+# Explanatory modeling
+
+
+## Variable selection
+
+Variable selection is a specific form of the model selection. consider the full linear regression model with $p$ variables:
+$$
+Y=\beta_0 + \beta_1 X_1+\beta_2 X_2+...+\beta_{p-1} X_{p-1}+\beta_p X_p
+$$
+
+The variable selection is equivalent to fix one or more $\beta$ to 0.
+$$
+Y=\beta_0 + \beta_1 X_1+\beta_2 X_2+...+\beta_{p-1} X_{p-1}+\beta_p X_p\\
+Y=\beta_0 + 0* X_1+\beta_2 X_2+...+\beta_{p-1} X_{p-1}+\beta_p X_p\\
+Y=\beta_0 + \beta_1 X_1+0* X_2+...+\beta_{p-1} X_{p-1}+\beta_p X_p\\
+...\\
+Y=\beta_0 + \beta_1 X_1+\beta_2 X_2+...+0*X_{p-1}+\beta_p X_p\\
+Y=\beta_0 + \beta_1 X_1+\beta_2 X_2+...+\beta_{p-1} X_{p-1}+0*X_p\\
+..\\
+Y=\beta_0 + 0*X_1+0*X_2+...+0*X_{p-1}+0*X_p\\
+$$
+
+How to compare these models? They are nested models! (we can obtain all these models shrinking one or more parameters of the full to 0)
+
+Their comparison simply consists to test the assumption: is $\beta_p=0$?
+
+
+## Model selection and variable selection
+
+The term "model selection" includes the variable selection. Indeed, we can compare these 5 models:
+
+$$
+Y=\beta_0 + \beta_1 X_1\\
+Y=\beta_0 + \beta_1 X_1+\beta_2 X_2\\
+Y=\exp(\beta_0 + \beta_1 X_1+\beta_2 X_2)\\
+Y=\exp(\beta_0 + \beta_1 X_1^2 \log(\beta_2 X_2))\\
+Y=\beta_0 + f(\beta_1 X_1)+\beta_2 X_2
+$$
+
+With $f()$ a complex function such as spline. We can consider that all of these equations are **models** (some are nested (ex: 1 and 2), but not all). 
+
+These models are not nested, because we cannot reduce the model 3 to the model 1 or 2 shrinking one or more parameters to 0. In this case, testing the assumption "is $\beta_p=0$?" is not relevant and other criteria should be considered, such as the bayesian information criterion.
+
+
+
+
+# Explanatory model development strategies
+
+## Stepwise selection
+
+### Different types of stepwise selection
+
+#### Forward selection
+
+The forward selection is a prospective strategy, beginning from the simplest model and increase complexity it at each step. For robustness to small sample size, likelihood ratio test (LRT) may be used to test that the associated coefficient is different from 0. We can write:
+
+
+|    |    |    |
+|-----|-----------------------------|-------------------------------------|
+| *Step* | *Simplified model representation ("0" coefficient removed)* |  | 
+| Step 1: | $Y=\beta_0$ |  |
+| Step 2: | $Y=\beta_0+\beta_1 X_1$ | if $\beta_1$ is significantly different from 0 according to the LRT, add $\beta_2 X_2$ |
+| Step 3: | $Y=\beta_0+\beta_1 X_1+\beta_2 X_2$ | if $\beta_2$ is not significantly different from 0 according to the LRT, remove $\beta_2 X_2$ and add $\beta_3 X_3$ |
+| Step 4: | $Y=\beta_0+\beta_1 X_1+\beta_3 X_3$ | if $\beta_3$ is significantly different from 0 according to the LRT, add $\beta_4 X_4$ |
+| Step 5: | $Y=\beta_0+\beta_1 X_1+\beta_3 X_3+\beta_4 X_4$ | ... --> until adding remaining variables add no significant information |
+
+
+
+#### Backward selection
+
+The backward selection is a retrospective strategy, beginning from the most complex model and simplifying it at each step. For robustness to small sample size, likelihood ratio test (LRT) may be used to test that the associated coefficient is different from 0. We can write:
+
+|    |    |    |
+|-----|-----------------------------|-------------------------------------|
+| *Step* | *Simplified model representation ("0" coefficient removed)* |  | 
+| Step 1: | $Y=\beta_0+\beta_1X_1+\beta_2 X_2+...+\beta_{p-1}X_{p-1}+\beta_p X_p$ |  |
+| Step 2: | $Y=\beta_0+\beta_1X_1+\beta_2 X_2+...+\beta_{p-1}X_{p-1}$ | if $\beta_p$ is significantly different from 0 according to the LRT, keep $\beta_p X_p$ |
+| Step 3: | $Y=\beta_0+\beta_1X_1+\beta_2 X_2+...+\beta_{p-2}X_{p-2}+\beta_p X_p$ | if $\beta_{p-1}$ is not significantly different from 0 according to the LRT, remove $\beta_{p-2} X_{p-2}$ |
+| Step 4: | $Y=\beta_0+\beta_1X_1+\beta_2 X_2+...+\beta_{p-3}X_{p-3}+\beta_p X_p$ | ... --> until removing variables is no significant relevant |
+
+
+
+#### Both
+
+Due to variables relations (inducing correlations), some variables with no significant effect could have significant effect if others were removed (see multicollinearity below). So, it may be interesting to perform a mixture of backward and forward selection to reintroduced removed variables.
+
+
+
+### Multicollinearity and confounding factors consideration/detection in stepwise selection
+
+#### Definition
+
+Statistical model is like a young child: without prior experiment (or prior knowledge brought by parents), she/he cannot distinguish the cause (when you have a doubt between 2 causes, you avoid to express a too strong conclusion about these 2 factors). For a statistical model, this doubt is characterized by a larger variance on the parameters associated to the more likely causes.
+
+
+#### Example
+
+
+Hypothetical example: It is pleasant to take coffee during smoking. So, smoking is correlated to coffee comsumption. As lung cancer risk increase with smoking, so with coffee consumption, the model will assign a weight ($\beta$) to each of them, but with a large variance.
+
+Proof by simulations: Simulate 1000 times 6 normal variables for 100 individuals with:
+
+- scenario 1: high correlation between (0.75) X1 and X2, and null correletion with all other variables
+- scenario 2: low correlation (0.10) between X1 and the 5 other variables
+
+According to correlation formulae: $\rho_{XY}=\frac{\sigma_{XY}}{\sigma_{X}\sigma_{Y}}$
+If we take variables $X$ and $Y$ with variance of 1, $\sqrt{\sigma_{X}^2}=\sqrt{\sigma_{Y}^2}=1$, so $\rho_{XY}=\sigma_{XY}$. The covariance between scaled covariance is therefore equal to their correlation.
+
+
+
+```{r echo=FALSE}
+library(MASS)
+covMat0<-matrix(0,6,6) #independent variables
+diag(covMat0)<-1 #with variances equal to 1, the correlation matrix == covariance matrix
+covMatHigh<-covMat0
+covMatHigh[1,2]<-covMatHigh[2,1]<-0.75 #high correlation between only variables 1 and 2
+covMatLow<-covMat0
+covMatLow[1,1:6]<-covMatLow[1:6,1]<-0.1 #small correlation between all variables
+
+stockBeta0<-stockBetaHigh<-stockBetaLow<-stockVarBeta0<-stockVarBetaHigh<-stockVarBetaLow<-matrix(0,nrow=1000,ncol=7) #stock parameter estimates and their variances
+stockMSE0<-stockMSEHigh<-stockMSELow<-rep(0,1000) #stock prediction error
+stockX1Cov0<-stockX1CovHigh<-stockX1CovLow<-0 #In how many simulations the true parameter of X1 is in its 95% confidence interval
+stockX1Pow0<-stockX1PowHigh<-stockX1PowLow<-0 #In how many simulations 0 is in the X1 95% confidence interval (= statistical power)
+for(i in 1:1000){
+  set.seed(i)
+  X<-mvrnorm(100, rep(0,6), covMat0)
+  Y<-2+0.5*X[,1]-1.5*X[,2]+2.5*X[,3]-0.5*X[,4]+3.5*X[,5]+rnorm(100)
+  m<-lm(Y~X)
+  stockBeta0[i,]<-coef(m)
+  stockVarBeta0[i,]<-diag(vcov(m))
+  CI<-confint(m)[2,]
+  stockX1Cov0<-stockX1Cov0+I(CI[1]<=0.5 & CI[2]>=0.5)
+  stockX1Pow0<-stockX1Pow0+!I(CI[1]<=0 & CI[2]>=0)
+  X<-mvrnorm(100, rep(0,6), covMat0)
+  Y<-2+0.5*X[,1]-1.5*X[,2]+2.5*X[,3]-0.5*X[,4]+3.5*X[,5]+rnorm(100)
+  stockMSE0[i]<-sum((Y-predict(m,newdata = list(X=X)))^2)
+  
+  set.seed(i)
+  X<-mvrnorm(100, rep(0,6), covMatHigh)
+  Y<-2+0.5*X[,1]-1.5*X[,2]+2.5*X[,3]-0.5*X[,4]+3.5*X[,5]+rnorm(100)
+  m<-lm(Y~X)
+  stockBetaHigh[i,]<-coef(m)
+  stockVarBetaHigh[i,]<-diag(vcov(m))
+  CI<-confint(m)[2,]
+  stockX1CovHigh<-stockX1CovHigh+I(CI[1]<=0.5 & CI[2]>=0.5)
+  stockX1PowHigh<-stockX1PowHigh+!I(CI[1]<=0 & CI[2]>=0)
+  X<-mvrnorm(100, rep(0,6), covMatHigh)
+  Y<-2+0.5*X[,1]-1.5*X[,2]+2.5*X[,3]-0.5*X[,4]+3.5*X[,5]+rnorm(100)
+  stockMSEHigh[i]<-sum((Y-predict(m,newdata = list(X=X)))^2)
+  
+  set.seed(i)
+  X<-mvrnorm(100, rep(0,6), covMatLow)
+  Y<-2+0.5*X[,1]-1.5*X[,2]+2.5*X[,3]-0.5*X[,4]+3.5*X[,5]+rnorm(100)
+  m<-lm(Y~X)
+  stockBetaLow[i,]<-coef(m)
+  stockVarBetaLow[i,]<-diag(vcov(m))
+  CI<-confint(m)[2,]
+  stockX1CovLow<-stockX1CovLow+I(CI[1]<=0.5 & CI[2]>=0.5)
+  stockX1PowLow<-stockX1PowLow+!I(CI[1]<=0 & CI[2]>=0)
+  X<-mvrnorm(100, rep(0,6), covMatLow)
+  Y<-2+0.5*X[,1]-1.5*X[,2]+2.5*X[,3]-0.5*X[,4]+3.5*X[,5]+rnorm(100)
+  stockMSELow[i]<-sum((Y-predict(m,newdata = list(X=X)))^2)
+}
+```
+
+
+
+
+Look at the parameter estimate:
+
+```{r echo=FALSE}
+i<-2
+plot(density(stockBeta0[,i]),xlim=range(c(stockBeta0[,i],stockBetaHigh[,i],stockBetaLow[,i])),main="X1 parameter estimates")
+lines(density(stockBetaHigh[,i]),col=2)
+lines(density(stockBetaLow[,i]),col=3)
+abline(v=0.5)
+legend("topleft",c("True value","No correlation","Correlation of 0.75 with only X2","Correlation of 0.10 with the other 5 variables"),lty=1,col=c("grey",1:3),bty="n")
+```
+
+The X1 parameter estimate is more variable when there is high correlation with X2. This phenomenon is stronger with low correlation with several variables. Removing a variable in a model may thus cause a variation of the parameters of its correlated variables. This may help to detect multicollinearity, thus, confounding factors. This is the relative variation (RV) may be used to highlight a problem of multicollinearity (problem in the presence of confounding factors). A variation of ~20% of 1 or more coefficients may be symptomatic.
+However, as represented by the density, in the majority of cases, the parameter is closed to the true parameter.
+
+Another criterion which is more robust is based on the variance inflation. Look at the variance of the parameter associated to X1:
+
+```{r echo=FALSE}
+i<-2
+plot(density(stockVarBeta0[,i]),xlim=range(c(stockVarBeta0[,i],stockVarBetaHigh[,i],stockVarBetaLow[,i])),main="X1 parameter variance estimates")
+lines(density(stockVarBetaHigh[,i]),col=2)
+lines(density(stockVarBetaLow[,i]),col=3)
+legend("topright",c("No correlation","Correlation of 0.75 with only X2","Correlation of 0.10 with the other 5 variables"),lty=1,col=1:3,bty="n")
+```
+
+The difference between the scenarii is more clear: the inflation of the variance clearly increases with the correlation with other variables. The distribution being more distinguished than the ones of the parameter estimates, the use a detection criterion based on the variance inflation is more consistent for multicollinearity detection. The more common is the variance inflation factor (VIF) which quantify the increase of the variance due to multicollinearity.
+ 
+Looking at the VIF in the scenario with high correlation between X1 et X2:
+
+```{r}
+library(car)
+set.seed(1)
+X<-mvrnorm(100, rep(0,6), covMatHigh)
+Y<-2+0.5*X[,1]-1.5*X[,2]+2.5*X[,3]-0.5*X[,4]+3.5*X[,5]+rnorm(100)
+d<-data.frame(cbind(Y,X)) #data should be a data.frame
+colnames(d)<-c("Y",paste0("X",1:6))
+m<-lm(Y~.,d)
+vif(m)
+```
+
+The VIF is higher for the correlated variables X1 and X2. For uncorrelated variables, the VIF is closed to 1.
+
+For the scenario with low correlation between X1 and the other variables:
+
+```{r}
+set.seed(1)
+X<-mvrnorm(100, rep(0,6), covMatLow)
+Y<-2+0.5*X[,1]-1.5*X[,2]+2.5*X[,3]-0.5*X[,4]+3.5*X[,5]+rnorm(100)
+d<-data.frame(cbind(Y,X)) #data should be a data.frame
+colnames(d)<-c("Y",paste0("X",1:6))
+m<-lm(Y~.,d)
+vif(m)
+
+```
+
+The VIF of X1 is high, but the VIF of the other variables is not closed to one due to their correlation with X1.
+
+The correlation between continuous variable is easy to compute a priori. But it may be more difficult if you have a mixture of explanatory variables which are continuous, binary, categorical, ordinal, count,... VIF allows to identify potential multicollinearity issue in this case.
+
+
+#### Deal with multicollinearity
+
+Before modeling, remove the variables which are unlikely related to the response. Ex: it is not useful to consider coffee in lung cancer risk analysis! (coffee consumption and tabac consumption are often related, that may lead to surprising conclusion).
+
+Multicollinearity may be detected in stepwise selection if, when we remove a variable, the parameter estimate (or its variance) of at least one other variable change of more than 20%. The VIF may be a good indicator, but it is difficult to define general threshold, because it is model dependent (form of the model, number of predictors, wrong specification of the model,...).
+
+If multicollinearity is detected, there is potential confounding, but this can also be due to randomness. In explanatory point of view, the confounding should be taken into account. If it is possible to draw plausible biological/causal hypothesis, this variable (and the others which are correlated to it) should be forced in the model, even if they are not statistically significantly associated to the response. If no plausible hypothesis exists, remove it.
+
+
+
+### Note on multicolinearity and predictive modeling
+
+When we look at the influence of the predictive performance in presence of multicollinearity, we don't see differnce, even with strong variable correlation.
+
+
+```{r echo=FALSE}
+plot(density(stockMSE0),main="Mean squared error on new data drawn from the same DGP")
+lines(density(stockMSEHigh),col=2)
+lines(density(stockMSELow),col=3)
+legend("topleft",c("True value","No correlation","Correlation of 0.75 with only X2","Correlation of 0.10 with the other 5 variables"),lty=1,col=c("grey",1:3),bty="n")
+```
+
+
+Predictive modeling doesn't care about multicollinearity. Even it limits interpretation, it is not problematic for prediction (lot of "data scientist" does not event know this phenomenon.
+
+
+
+### Pros & cons of stepwise selection
+
+The stepwise selection is the most widely used and studied model selection method. Its theoretical properties are well known. In addition, careful check of multicollinearity help to find confounding factors to enrich interpretation. It is however limited to the case of nested models and it is very long to perform and difficult to automatize if the number of model to compare is large (especially if we want to consider confounding factor detection using multicollinearity). Moreover, it is unstable when the number of variables increase (using different starting model in mixture of forward/backward, the final model will be different, cf example in Cox_notebook.Rmd).
+
+Some automatic procedures exists, but are based on other less adapted criteria for explanatory model development. For example, the function *stepAIC* use the Akaike information criterion (AIC) for stepwise selection, which is a predictive model criterion, and it does not take into account of multicollinearity.
+
+
+
+## Bayesian Information Criterion (BIC)
+
+### Definition
+
+The BIC is not specific to bayesian framework (and even non optimal in some bayesian contexts). Its interpretation is simple: lower is better.
+
+### Pros & cons
+
+The BIC selection is simple to implement and allow to compare non-nested model. The comparison of all models we consider allows to select the best model without to be stuck in a suboptimal model such as the stepwise selection. It is however computationally demanding and no quantity allows to define a significant difference between 2 BIC values. Finally, it does not consider multicollinearity check, thus allowed to highlight confounding factors, decreasing the interpretability.
+
+
+
+# Note on more complex variable selection
+
+To decrease the computational burden, you may sometimes people talking about LASSO penalty which may be used to avoid to perform variable selection. It is out of the scope of this formation, because more mathematical theory mastering is required. But:
+
+- the model development procedure is based on predictive criterion, this model is thus not suitable for explanatory model
+- parameters are biased, their variances too -> parameter estimates and their p-values are not interpretable
+- it is not stable: try to run the procedure several times on the same data (without fixing seed), different variables will be selected -> focusing on only one run may lead to suboptimal prediction model, but using several run is very limiting for interpretation
+- More complex than the other model selection methods: the R function is simple, but may product sub-optimal result if no mathematical robust way is not consider to correctly parameterize this procedure, and especially to fix a model across different run of the procedure
+
+If you face to this type of issue, please contact	a statistician which master this method (that is unfortunately not the case of all statisticians who use it...).
+
+
+# Let's play!
+
+See "Let's play!" section of the parametric models notebook.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
