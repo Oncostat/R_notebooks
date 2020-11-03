@@ -1,6 +1,8 @@
 ---
 title: "Méthodes descriptives et modèles non-paramétriques"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 
@@ -76,8 +78,23 @@ summary(KM)
 
 Nous retrouvons ici la table vue en cours du calcul des probabilités de survie à chaque temps d'évènement. Attention si vous voulez refaire le calcul à la main, le nombre de censures à chaque temps n'est pas affiché.
 
+
+## Médiane de survie
+
+Comme indiqué en cours, la médiane de survie ne se calcule pas simplement en prenant la médiane des temps disponibles, mais à partir de l'estimateur de Kaplan-Meier. Nous pouvons l'obtenir très facilement à partir de l'objet que nous avons créé précédemment :
+
+```{r}
+KM
+```
+
+Cette médiane nous est fournie avec son intervalle de confiance à 95% : 80 [52; 100]
+
+
+
+
 ## Interval de confiance
 
+L'intervalle de confiance permet de mesurer l'incertitude de l'estimateur de Kaplan-Meier à chaque temps d'évènement, et est une représentation de l'incertitude adaptée si l'intérêt de l'étude se porte sur un temps particulier (exemple : survie à 5 ans).
 Plusieurs méthodes ont été proposées pour le calcul de l'intervalle de confiance. D'après plusieurs études de simulation, la méthode proposée par défaut par la fonction *survfit* n'est pas la meilleure. Aussi, nous pouvons utiliser la méthode *log-log*, plus robuste en utilisant l'option *conf.type* :
 
 ```{r}
@@ -94,16 +111,15 @@ summary(rothmanCI)
 ```
 
 
-## Médiane de survie
+## Bande de confiance
 
-Comme indiqué en cours, la médiane de survie ne se calcule pas simplement en prenant la médiane des temps disponibles, mais à partir de l'estimateur de Kaplan-Meier. Nous pouvons l'obtenir très facilement à partir de l'objet que nous avons créé précédemment :
+Elle permet de mesurer l'incertitude sur toute la courbe de survie. C'est une représentation de l'incertitude adaptée si l'intérêt de l'étude se porte sur l'ensemble du suivi. Elle peut donc être associée comme représentation graphique en parallèle du test du log-rank (qui compare la survie entre 2 groupes en prenant en compte tout le suivi).
+Pour cela, nous utiliserons la méthode de Hall-Wellner avec transformation logarithmique :
 
 ```{r}
-KM
+HWCB <- km.ci(KM, conf.level=0.95, method="loghall") 
+summary(HWCB)
 ```
-
-Cette médiane nous est fournie avec son intervalle de confiance à 95% : 80 [52; 100]
-
 
 
 
@@ -119,10 +135,11 @@ Pour afficher la courbe, comme souvent, il suffit d'utiliser l'objet *KM* dans u
 plot(survfit(Surv(time, status) ~ 1,data=veteran) ,xlab="Time from inclusion (days)", ylab="Probability of survival", main="Overall survival")
 plot(KM,xlab="Time from inclusion (days)", ylab="Probability of survival", main="Overall survival")
 plot(rothmanCI,xlab="Time from inclusion (days)", ylab="Probability of survival", main="Overall survival")
+plot(HWCB,xlab="Time from inclusion (days)", ylab="Probability of survival", main="Overall survival")
 ```
 
 
-L'IC correspond à celui demandé dans la fonction survfit utilisée pour la création de l'objet KM (ou rothmanCI). Vous verrez qu'il y a une légère différence entre les 3 courbes, la première utilisant la méthode log (méthode par défaut), la seconde utilisant la méthode log-log, et la troisième utilisant la méthode de Rothman.
+L'IC (ou la bande de confiance) correspond à celui demandé dans la fonction survfit utilisée pour la création de l'objet KM (ou rothmanCI, ou HWCB). Vous verrez qu'il y a une légère différence entre les 3 courbes, la première utilisant la méthode log (méthode par défaut), la seconde utilisant la méthode log-log, et la troisième utilisant la méthode de Rothman.
 
 Afin d'embellir un peu notre rapport, nous pouvons utiliser le package *survminer* qui se base sur le package *ggplot2* pour fournir de plus jolis graphiques :
 ```{r}
@@ -133,6 +150,7 @@ ggsurvplot(rothmanCI)
 ```
 
 Tout comme la méthode précédente, nous voyons que l'IC dépend bien de celui utilisé.
+La bande de confiance n'est malheureusement pas supportée par défaut par ce package. Un code plus complexe sera proposé dans une version ultérieure de ce notebook.
 
 Le gros avantage de ce package est qu'il permet d'afficher une table d'effectifs sous le graphique, très souvent demandée pour les articles scientifiques :
 
