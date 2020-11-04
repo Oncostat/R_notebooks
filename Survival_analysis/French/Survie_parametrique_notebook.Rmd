@@ -326,7 +326,7 @@ Nous pouvons extraire facilement ces paramètres depuis  l'objet `survfit` :
 
 ```{r}
 mu_logNorm2<-fit_logNorm2$coef
-scale_logNorm2<-exp(fit_logNorm2$scale)
+scale_logNorm2<-fit_logNorm2$scale
 ```
 
 
@@ -495,9 +495,9 @@ On peut constater que la moyenne de la distribution de Weibull est assigné à t
 fit_weib2<-survreg(Surv(time,status) ~ sex, kidney,dist="weibull")
 #summary(fit_weib2)
 #prediction pour sex = 1
-print(paste0("Prédiction pour les hommes : ",predict(fit_weib2,newdata = list(sex=1))))
+print(paste0("Prédiction pour les hommes : ",predict(fit_weib2,newdata = list(sex=0))))
 #prediction pour sex = 2
-print(paste0("Prédiction pour les femmes : ",predict(fit_weib2,newdata = list(sex=2))))
+print(paste0("Prédiction pour les femmes : ",predict(fit_weib2,newdata = list(sex=1))))
 
 ```
 Mais quand on regarde le graphique, il y a peut être un meilleur modèle :

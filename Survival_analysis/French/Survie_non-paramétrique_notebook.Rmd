@@ -1,8 +1,12 @@
 ---
 title: "Méthodes descriptives et modèles non-paramétriques"
 output:
-  html_document:
-    df_print: paged
+  html_document: 
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+  html_notebook: default
+  pdf_document: default
 ---
 
 
